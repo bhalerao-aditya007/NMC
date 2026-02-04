@@ -109,23 +109,26 @@ class ReportGenerator:
 
     def _create_red_flag_dataframe(self) -> pd.DataFrame:
         rows = []
+
         for entry in self.report_data.get("red_flagged", []):
-            rows.append(
-                {
-                    "Excel Row": entry["record_index"],
-                    "Sr No": entry["sr_no"],
-                    "Budget Item": entry["budget_item_no"],
-                    "Work Name": entry["name_of_work"],
-                    "Flags": ", ".join(f["flag_name"] for f in entry["flags"]),
-                    "Severity": ", ".join(
-                        f.get("severity", "N/A") for f in entry["flags"]
-                    ),
-                    "Issues": " | ".join(
-                        f["description"] for f in entry["flags"]
-                    ),
+            for flag in entry["flags"]:
+                row = {
+                "Excel Row No": entry["record_index"],
+                "Sr No": entry["sr_no"],
+                "Budget Item No": entry["budget_item_no"],
+                "Name of Work": entry["name_of_work"],
+                "Flag Type": flag["flag_name"],
+                "Severity": flag.get("severity", "N/A"),
+                "Reason": flag["description"]
                 }
-            )
+
+                for k, v in flag.get("details", {}).items():
+                    row[k.replace("_", " ").title()] = v
+
+                rows.append(row)
+
         return pd.DataFrame(rows)
+
 
     def _create_green_flag_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame(
