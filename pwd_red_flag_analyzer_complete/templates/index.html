@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PWD Works Red Flag Analyzer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo-section">
+                <div class="logo">🚩</div>
+                <div>
+                    <h1>PWD Works Red Flag Analyzer</h1>
+                    <p class="subtitle">Automated Audit Compliance Analysis System</p>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Upload Section -->
+            <section class="upload-section" id="uploadSection">
+                <div class="card">
+                    <h2>📁 Upload Excel File for Analysis</h2>
+                    <p class="info-text">
+                        Upload your PWD works Excel file (.xlsx or .xls) to analyze against 8 audit red flag criteria.
+                        The system supports multilingual content (English, Hindi, Marathi).
+                    </p>
+                    
+                    <form id="uploadForm" enctype="multipart/form-data">
+                        <div class="file-upload-wrapper">
+                            <input type="file" id="fileInput" name="file" accept=".xlsx,.xls" required>
+                            <label for="fileInput" class="file-upload-label">
+                                <span class="upload-icon">📤</span>
+                                <span id="fileName">Choose Excel File</span>
+                            </label>
+                        </div>
+
+                        <div class="format-selection">
+                            <h3>Output Formats:</h3>
+                            <div class="checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="formats" value="excel" checked>
+                                    <span>Excel Report</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="formats" value="html" checked>
+                                    <span>HTML Report</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="formats" value="json">
+                                    <span>JSON Data</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" id="analyzeBtn">
+                            <span class="btn-text">Analyze File</span>
+                            <span class="btn-icon">→</span>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Loading Indicator -->
+                <div class="loading-overlay" id="loadingOverlay">
+                    <div class="spinner"></div>
+                    <p>Analyzing your file... This may take a few moments.</p>
+                </div>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results-section hidden" id="resultsSection">
+                <div class="card">
+                    <h2>📊 Analysis Results</h2>
+                    
+                    <!-- Summary Cards -->
+                    <div class="summary-grid" id="summaryGrid">
+                        <!-- Cards will be inserted here by JavaScript -->
+                    </div>
+
+                    <!-- Data Quality -->
+                    <div class="quality-section" id="qualitySection">
+                        <!-- Quality info will be inserted here -->
+                    </div>
+
+                    <!-- Download Links -->
+                    <div class="download-section" id="downloadSection">
+                        <h3>📥 Download Reports</h3>
+                        <div class="download-grid" id="downloadGrid">
+                            <!-- Download links will be inserted here -->
+                        </div>
+                    </div>
+
+                    <!-- New Analysis Button -->
+                    <button class="btn btn-secondary" onclick="resetForm()">
+                        ← Analyze Another File
+                    </button>
+                </div>
+            </section>
+
+            <!-- Red Flag Criteria Information -->
+            <section class="info-section">
+                <div class="card">
+                    <h2>ℹ️ Red Flag Criteria</h2>
+                    <div class="criteria-grid">
+                        <div class="criterion">
+                            <div class="criterion-number">1</div>
+                            <div class="criterion-content">
+                                <h4>Diversion of Funds</h4>
+                                <p>Checks if deposit work funds are diverted to other works without written request</p>
+                            </div>
+                        </div>
+                        <div class="criterion">
+                            <div class="criterion-number">2</div>
+                            <div class="criterion-content">
+                                <h4>Wasteful Survey Expenditure</h4>
+                                <p>Identifies improper survey work expenditure with nil payments for other items</p>
+                            </div>
+                        </div>
+                        <div class="criterion">
+                            <div class="criterion-number">3</div>
+                            <div class="criterion-content">
+                                <h4>Excess Expenditure</h4>
+                                <p>Detects expenditure exceeding Administrative Approval by more than 10%</p>
+                            </div>
+                        </div>
+                        <div class="criterion">
+                            <div class="criterion-number">4</div>
+                            <div class="criterion-content">
+                                <h4>Overlapping Works</h4>
+                                <p>Finds maintenance works overlapping with ongoing projects during DLP</p>
+                            </div>
+                        </div>
+                        <div class="criterion">
+                            <div class="criterion-number">5</div>
+                            <div class="criterion-content">
+                                <h4>Delay in Completion</h4>
+                                <p>Identifies works not completed within stipulated time period</p>
+                            </div>
+                        </div>
+                        <div class="criterion">
+                            <div class="criterion-number">6</div>
+                            <div class="criterion-content">
+                                <h4>Splitting of Works</h4>
+                                <p>Detects artificially split works to avoid e-tendering (multiple <₹10 lakh)</p>
+                            </div>
+                        </div>
+                        <div class="criterion">
+                            <div class="criterion-number">7</div>
+                            <div class="criterion-content">
+                                <h4>Non-recovery of Centage</h4>
+                                <p>Checks for non-recovery of 5% centage charges on deposit works</p>
+                            </div>
+                        </div>
+                        <div class="criterion">
+                            <div class="criterion-number">8</div>
+                            <div class="criterion-content">
+                                <h4>Unspent Balance</h4>
+                                <p>Identifies unspent deposits (>₹1 lakh) not returned after work completion</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2026 PWD Audit Analysis System | Developed for Public Works Department</p>
+            <p class="footer-note">This system automates red flag detection based on audit criteria</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
