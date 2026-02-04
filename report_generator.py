@@ -195,3 +195,33 @@ class ReportGenerator:
             json.dump(self.report_data, f, indent=2, ensure_ascii=False, default=str)
 
         return output_file
+
+    def _create_html_content(self) -> str:
+        red = len(self.report_data.get("red_flagged", []))
+        green = len(self.report_data.get("green_flagged", []))
+        total = self.report_data.get("total_records", 0)
+
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>Red Flag Analysis Report</title>
+            <style>
+                body {{ font-family: Arial; padding: 20px; }}
+                h1 {{ color: #d32f2f; }}
+                table {{ border-collapse: collapse; width: 100%; }}
+                th, td {{ border: 1px solid #ccc; padding: 8px; }}
+                th {{ background: #f5f5f5; }}
+            </style>
+        </head>
+        <body>
+            <h1>🚩 Red Flag Analysis Report</h1>
+            <p><b>Total Records:</b> {total}</p>
+            <p><b>Red Flagged:</b> {red}</p>
+            <p><b>Green Flagged:</b> {green}</p>
+            <p><b>Generated:</b> {self.report_data.get("timestamp", "N/A")}</p>
+        </body>
+        </html>
+        """
+
