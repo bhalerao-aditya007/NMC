@@ -17,10 +17,7 @@ from report_generator import ReportGenerator
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('red_flag_analysis.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 
 logger = logging.getLogger(__name__)
