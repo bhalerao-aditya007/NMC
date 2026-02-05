@@ -37,14 +37,14 @@ class RedFlagPipeline:
         
     def run(self, excel_file_path: str, 
             sheet_name: Optional[str] = None,
-            output_formats: list = ['excel', 'html']) -> dict:
+            output_formats: list = ['excel', 'pdf']) -> dict:
         """
         Run complete pipeline
         
         Args:
             excel_file_path: Path to Excel file
             sheet_name: Optional sheet name
-            output_formats: List of output formats ('excel', 'html', 'json')
+            output_formats: List of output formats ('excel', 'html', 'json', 'pdf')
             
         Returns:
             Dictionary with results and output file paths
@@ -175,9 +175,9 @@ def main():
         '--formats',
         type=str,
         nargs='+',
-        default=['excel', 'html'],
-        choices=['excel', 'html', 'json'],
-        help='Output formats (default: excel html)'
+        default=['excel', 'pdf'],
+        choices=['excel', 'html', 'json', 'pdf'],
+        help='Output formats (default: excel pdf)'
     )
     
     args = parser.parse_args()

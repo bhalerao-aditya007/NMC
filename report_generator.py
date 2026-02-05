@@ -39,6 +39,8 @@ class ReportGenerator:
             return self._generate_html_report()
         elif output_format == "json":
             return self._generate_json_report()
+        elif output_format == "pdf":
+            return self._generate_pdf_report()
         else:
             raise ValueError(f"Unsupported output format: {output_format}")
 
@@ -199,6 +201,103 @@ class ReportGenerator:
 
         return output_file
 
+    # ------------------ PDF ------------------
+
+    def _generate_pdf_report(self) -> str:
+        try:
+            from reportlab.lib import colors
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.platypus import (
+                SimpleDocTemplate,
+                Paragraph,
+                Spacer,
+                Table,
+                TableStyle,
+            )
+        except ImportError as exc:
+            raise ValueError(
+                "PDF generation requires the 'reportlab' package."
+            ) from exc
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = os.path.join(
+            self.output_dir, f"Red_Flag_Analysis_Report_{timestamp}.pdf"
+        )
+
+        styles = getSampleStyleSheet()
+        story = [
+            Paragraph("PWD Red Flag Analysis Report", styles["Title"]),
+            Paragraph(
+                f"Generated: {self.report_data.get('timestamp', 'N/A')}",
+                styles["Normal"],
+            ),
+            Spacer(1, 12),
+        ]
+
+        summary = self.report_data.get("flag_summary", {})
+        summary_data = [
+            ["Metric", "Value"],
+            ["Total Records", self.report_data.get("total_records", 0)],
+            ["Red Flagged", len(self.report_data.get("red_flagged", []))],
+            ["Green Flagged", len(self.report_data.get("green_flagged", []))],
+            ["High Severity", summary.get("by_severity", {}).get("HIGH", 0)],
+            ["Medium Severity", summary.get("by_severity", {}).get("MEDIUM", 0)],
+            ["Low Severity", summary.get("by_severity", {}).get("LOW", 0)],
+        ]
+
+        summary_table = Table(summary_data, hAlign="LEFT")
+        summary_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#FFB399")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#333333")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                ]
+            )
+        )
+        story.extend([summary_table, Spacer(1, 16)])
+
+        red_flag_rows = [
+            ["Excel Row", "Work Name", "Flag", "Severity", "Reason"]
+        ]
+        for entry in self.report_data.get("red_flagged", []):
+            for flag in entry.get("flags", []):
+                red_flag_rows.append(
+                    [
+                        entry.get("record_index", ""),
+                        entry.get("name_of_work", "")[:50],
+                        flag.get("flag_name", ""),
+                        flag.get("severity", "N/A"),
+                        flag.get("description", "")[:80],
+                    ]
+                )
+
+        if len(red_flag_rows) > 1:
+            story.append(Paragraph("Red Flag Details", styles["Heading2"]))
+            red_flag_table = Table(red_flag_rows, hAlign="LEFT", colWidths=[60, 150, 110, 70, 160])
+            red_flag_table.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#FFE5D9")),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#333333")),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ]
+                )
+            )
+            story.extend([red_flag_table, Spacer(1, 12)])
+        else:
+            story.append(Paragraph("No red flags detected.", styles["Normal"]))
+
+        doc = SimpleDocTemplate(output_file, pagesize=A4)
+        doc.build(story)
+
+        return output_file
+
     def _create_html_content(self) -> str:
         red = len(self.report_data.get("red_flagged", []))
         green = len(self.report_data.get("green_flagged", []))
@@ -227,4 +326,3 @@ class ReportGenerator:
         </body>
         </html>
         """
-

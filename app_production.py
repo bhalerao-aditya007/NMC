@@ -82,7 +82,7 @@ def upload_file():
         # Get output formats from request
         output_formats = request.form.getlist('formats')
         if not output_formats:
-            output_formats = ['excel', 'html']
+            output_formats = ['excel', 'pdf']
         
         # Run analysis pipeline
         pipeline = RedFlagPipeline()
@@ -188,7 +188,7 @@ def api_info():
             'Non-recovery of Centage',
             'Unspent Balance'
         ],
-        'output_formats': ['excel', 'html', 'json']
+        'output_formats': ['excel', 'pdf', 'html', 'json']
     })
 
 
