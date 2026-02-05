@@ -3,177 +3,1654 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PWD Works Red Flag Analyzer</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <title>PWD Red Flag Detection - Production</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #FFFFFF;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 30px;
+            background: linear-gradient(135deg, #FFE5D9 0%, #FFDAC7 100%);
+            border-radius: 12px;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            color: #333;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .upload-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 24px;
+            margin-bottom: 30px;
+        }
+
+        .upload-section {
+            background: #FFFFFF;
+            border: 2px dashed #FFD4C0;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .upload-section:hover {
+            border-color: #FFB399;
+            background: #FFFAF8;
+        }
+
+        .upload-section.dragging {
+            background: #FFF5F0;
+            border-color: #FF9966;
+        }
+
+        .upload-button {
+            background: #FFB399;
+            color: #333;
+            padding: 14px 32px;
+            border-radius: 8px;
+            border: none;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .upload-button:hover {
+            background: #FF9966;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .processing {
+            text-align: center;
+            padding: 40px;
+            background: #FFF5F0;
+            border-radius: 12px;
+            margin: 20px 0;
+        }
+
+        .spinner {
+            border: 4px solid #FFE5D9;
+            border-top: 4px solid #FFB399;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .document-analysis {
+            background: #FFFFFF;
+            border: 2px solid #FFE5D9;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 30px;
+        }
+
+        .doc-header {
+            background: linear-gradient(135deg, #FFE5D9 0%, #FFDAC7 100%);
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .doc-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .section {
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #FFE5D9;
+        }
+
+        .data-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 16px;
+        }
+
+        .data-item {
+            background: #FFF5F0;
+            padding: 12px;
+            border-radius: 6px;
+        }
+
+        .data-label {
+            font-weight: 600;
+            color: #666;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .data-value {
+            color: #333;
+            font-size: 16px;
+            word-break: break-word;
+        }
+
+        .data-value.highlight {
+            background: #FFFACD;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .extraction-quality {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-left: 12px;
+        }
+
+        .extraction-quality.excellent {
+            background: #4CAF50;
+            color: #FFFFFF;
+        }
+
+        .extraction-quality.good {
+            background: #8BC34A;
+            color: #FFFFFF;
+        }
+
+        .extraction-quality.fair {
+            background: #FFC107;
+            color: #333;
+        }
+
+        .extraction-quality.poor {
+            background: #FF6B6B;
+            color: #FFFFFF;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #FFFFFF;
+            font-size: 13px;
+            margin-top: 12px;
+        }
+
+        .data-table th {
+            background: #FFB399;
+            color: #333;
+            padding: 10px 8px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .data-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #FFE5D9;
+        }
+
+        .data-table tr:hover {
+            background: #FFF5F0;
+        }
+
+        .toggle-button {
+            background: #FFFFFF;
+            border: 2px solid #FFB399;
+            color: #333;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+
+        .toggle-button:hover {
+            background: #FFB399;
+        }
+
+        .collapsible {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .collapsible.open {
+            max-height: 3000px;
+        }
+
+        .raw-text {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: #333;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+            background: #F5F5F5;
+            padding: 12px;
+            border-radius: 6px;
+        }
+
+        .flag-alert {
+            background: #FFF5F0;
+            border: 2px solid #FFB399;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+
+        .flag-alert.critical {
+            border-color: #FF6B6B;
+            background: #FFE5E5;
+        }
+
+        .flag-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .flag-icon {
+            background: #FFB399;
+            color: #333;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .flag-alert.critical .flag-icon {
+            background: #FF6B6B;
+            color: #FFFFFF;
+        }
+
+        .flag-info {
+            flex: 1;
+        }
+
+        .flag-name {
+            font-size: 18px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .flag-description {
+            color: #666;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .flag-severity {
+            background: #FFB399;
+            color: #333;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .flag-severity.critical {
+            background: #FF6B6B;
+            color: #FFFFFF;
+        }
+
+        .flag-evidence {
+            background: #FFFFFF;
+            padding: 16px;
+            border-radius: 6px;
+            margin-top: 12px;
+        }
+
+        .evidence-title {
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+
+        .evidence-item {
+            display: flex;
+            padding: 8px 0;
+            border-bottom: 1px solid #F0F0F0;
+        }
+
+        .evidence-item:last-child {
+            border-bottom: none;
+        }
+
+        .evidence-label {
+            font-weight: 600;
+            color: #666;
+            min-width: 200px;
+        }
+
+        .evidence-value {
+            color: #333;
+            flex: 1;
+        }
+
+        .no-flags {
+            background: #E8F5E9;
+            border: 2px solid #4CAF50;
+            padding: 40px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .no-flags-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+
+        .summary-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #FFB399;
+            color: #333;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            margin-top: 12px;
+        }
+
+        .summary-badge.clean {
+            background: #4CAF50;
+            color: #FFFFFF;
+        }
+
+        .export-section {
+            text-align: center;
+            margin: 30px 0;
+            padding: 20px;
+        }
+
+        .export-button {
+            background: #FFB399;
+            color: #333;
+            padding: 12px 32px;
+            border-radius: 8px;
+            border: none;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin: 0 8px;
+        }
+
+        .export-button:hover {
+            background: #FF9966;
+        }
+
+        .export-button.secondary {
+            background: #FFFFFF;
+            border: 2px solid #FFB399;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #FFE5D9;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #FFB399;
+            transition: width 0.3s ease;
+        }
+
+        .extraction-debug {
+            background: #FFF9E6;
+            border: 1px solid #FFD700;
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 12px;
+            font-size: 12px;
+        }
+
+        .debug-title {
+            font-weight: 700;
+            color: #CC8800;
+            margin-bottom: 8px;
+        }
+
+        .field-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            margin: 2px;
+        }
+
+        .field-status.found {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .field-status.missing {
+            background: #FF6B6B;
+            color: white;
+        }
+
+        .format-selection {
+            margin-top: 16px;
+            text-align: left;
+        }
+
+        .checkbox-group {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        .checkbox-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .excel-results {
+            background: #FFFFFF;
+            border: 2px solid #FFE5D9;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 30px;
+        }
+
+        .download-grid {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+        }
+
+        .download-btn {
+            text-decoration: none;
+            background: #FFB399;
+            color: #333;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <div class="logo-section">
-                <div class="logo">🚩</div>
-                <div>
-                    <h1>PWD Works Red Flag Analyzer</h1>
-                    <p class="subtitle">Automated Audit Compliance Analysis System</p>
-                </div>
-            </div>
-        </header>
+    <div id="root"></div>
 
-        <!-- Main Content -->
-        <main class="main-content">
-            <!-- Upload Section -->
-            <section class="upload-section" id="uploadSection">
-                <div class="card">
-                    <h2>📁 Upload Excel File for Analysis</h2>
-                    <p class="info-text">
-                        Upload your PWD works Excel file (.xlsx or .xls) to analyze against 8 audit red flag criteria.
-                        The system supports multilingual content (English, Hindi, Marathi).
-                    </p>
+    {% raw %}
+    <script type="text/babel">
+        const { useState, useRef } = React;
+
+        // Enhanced extraction with multiple fallback patterns
+        function extractDataFromText(text, fileName, pageTexts) {
+            const data = {
+                fileName: fileName,
+                rawText: text.substring(0, 3000),
+                fullTextLength: text.length,
+                pageTexts: pageTexts,
+                
+                // Core fields
+                workName: '',
+                workId: null,
+                division: null,
+                userDepartment: null,
+                depositWorkId: null,
+                type: 'capital_work',
+                
+                // Financial data
+                aaAmount: null,
+                aaDate: null,
+                aaNumber: null,
+                technicalSanctionAmount: null,
+                contractAmount: null,
+                cumulativeExpenditure: null,
+                balanceAmount: null,
+                totalReceived: null,
+                
+                // Timeline data
+                workOrderDate: null,
+                originalTimeLimitDays: null,
+                extendedTimeLimit: null,
+                
+                // Agency info
+                mainAgency: null,
+                
+                // Bills
+                expenditureDetails: [],
+                
+                // Extraction metadata
+                extractionQuality: 0,
+                extractedFields: [],
+                missingFields: [],
+                debugInfo: []
+            };
+
+            // Clean text for better pattern matching
+            const cleanText = text.replace(/\s+/g, ' ');
+            
+            // WORK ID - Multiple patterns
+            let workIdMatch = text.match(/Work\s+ID[:\s]+([A-Z0-9\/]+)/i);
+            if (!workIdMatch) workIdMatch = text.match(/Work\s*ID\s*:?\s*([A-Z]{3}\/\d{2}\/\d{3}\/\d{5})/i);
+            if (workIdMatch) {
+                data.workId = workIdMatch[1].trim();
+                data.extractedFields.push('Work ID');
+            } else {
+                data.missingFields.push('Work ID');
+            }
+
+            // DEPOSIT WORK ID - More flexible pattern
+            let depositIdMatch = text.match(/Deposit\s+Work\s+ID[:\s]*([0-9\/A-Z]+)/i);
+            if (depositIdMatch) {
+                data.depositWorkId = depositIdMatch[1].trim();
+                data.type = 'deposit_work';
+                data.extractedFields.push('Deposit Work ID');
+            }
+
+            // DIVISION - Enhanced pattern
+            let divisionMatch = text.match(/Division[:\s]+(\d{10})\s*-\s*([^\n]+?)(?=Sub|Scheme|Work|$)/i);
+            if (!divisionMatch) divisionMatch = text.match(/Division[:\s]+([^\n]+?)(?=Sub|Scheme|$)/i);
+            if (divisionMatch) {
+                data.division = divisionMatch[0].replace('Division', '').replace(/[:]/g, '').trim();
+                data.extractedFields.push('Division');
+            } else {
+                data.missingFields.push('Division');
+            }
+
+            // USER DEPARTMENT
+            let userDeptMatch = text.match(/User\s+Department[:\s]*([^\n]+?)(?=Administrative|$)/i);
+            if (userDeptMatch) {
+                data.userDepartment = userDeptMatch[1].trim();
+                data.type = 'deposit_work';
+                data.extractedFields.push('User Department');
+            }
+
+            // WORK NAME - Enhanced extraction
+            let workNameMatch = text.match(/Name\s+[Oo]f\s+[Ww]ork[^:]*:[:\s]*(.*?)(?=Name\s+Of\s+The\s+Work|User\s+Department|Administrative|$)/is);
+            if (!workNameMatch) {
+                workNameMatch = text.match(/Construction\s+Of\s+[^\n]{20,200}/i);
+            }
+            if (!workNameMatch) {
+                workNameMatch = text.match(/Improvement[^\n]{20,200}/i);
+            }
+            if (workNameMatch) {
+                data.workName = workNameMatch[1] ? workNameMatch[1].trim().replace(/\s+/g, ' ').substring(0, 300) : workNameMatch[0].substring(0, 300);
+                data.extractedFields.push('Work Name');
+            } else {
+                data.missingFields.push('Work Name');
+            }
+
+            // TYPE DETECTION
+            if (text.toLowerCase().includes('utilisation certificate') || 
+                text.toLowerCase().includes('deposit work') ||
+                text.toLowerCase().includes('user department')) {
+                data.type = 'deposit_work';
+                data.extractedFields.push('Work Type: Deposit');
+            }
+
+            // AA AMOUNT - Multiple patterns with better number extraction
+            let aaMatch = text.match(/AA\s+Amount[^:]*:[^0-9]*(?:Rs\.?\s*)?([0-9,]+)/i);
+            if (!aaMatch) aaMatch = text.match(/Administrative\s+Approval[^:]*Amount[^:]*:[^0-9]*([0-9,]+)/i);
+            if (!aaMatch) aaMatch = text.match(/AA\s+Amount\s+in\s+Rupees[^:]*:[^0-9]*(?:Rs\.?\s*)?([0-9,]+)/i);
+            if (aaMatch) {
+                data.aaAmount = aaMatch[1].replace(/,/g, '');
+                data.extractedFields.push('AA Amount');
+            } else {
+                data.missingFields.push('AA Amount');
+            }
+
+            // AA DATE
+            let aaDateMatch = text.match(/Administrative\s+Approval\s+Date[:\s]*([0-9]{2}[-\/-][0-9]{2}[-\/-][0-9]{4})/i);
+            if (aaDateMatch) {
+                data.aaDate = aaDateMatch[1];
+                data.extractedFields.push('AA Date');
+            }
+
+            // AA NUMBER
+            let aaNumberMatch = text.match(/Administrative\s+Approval\s+No\.?[:\s]*([^\n]+?)(?=Administrative|AA|$)/i);
+            if (aaNumberMatch) {
+                data.aaNumber = aaNumberMatch[1].trim().substring(0, 100);
+                data.extractedFields.push('AA Number');
+            }
+
+            // TECHNICAL SANCTION
+            let tsMatch = text.match(/Technical\s+Sanction\s+Amt[^:]*:[^0-9]*(?:Rs\.?\s*)?([0-9,]+)/i);
+            if (tsMatch) {
+                data.technicalSanctionAmount = tsMatch[1].replace(/,/g, '');
+                data.extractedFields.push('Tech Sanction Amount');
+            }
+
+            // CONTRACT AMOUNT
+            let contractMatch = text.match(/Contract\s+Agreement\s+Amt[^:]*:[^0-9]*(?:Rs\.?\s*)?([0-9,]+)/i);
+            if (contractMatch) {
+                data.contractAmount = contractMatch[1].replace(/,/g, '');
+                data.extractedFields.push('Contract Amount');
+            }
+
+            // MAIN AGENCY
+            let agencyMatch = text.match(/Main\s+Agency\s+Name[:\s]*([^\n]+?)(?=Scope|Provision|$)/i);
+            if (agencyMatch) {
+                data.mainAgency = agencyMatch[1].trim();
+                data.extractedFields.push('Main Agency');
+            }
+
+            // CUMULATIVE EXPENDITURE - Get the maximum value
+            let allCumulativeMatches = [...text.matchAll(/Cumulative[^:]*(?:Expenditure|Amount)[^:]*:[^0-9]*([0-9,]+)/gi)];
+            if (!allCumulativeMatches.length) {
+                allCumulativeMatches = [...text.matchAll(/Up-to-date\s+expenditure[^:]*:[^0-9]*([0-9,]+)/gi)];
+            }
+            
+            let maxCumulative = 0;
+            allCumulativeMatches.forEach(match => {
+                const value = parseInt(match[1].replace(/,/g, ''));
+                if (value > maxCumulative) maxCumulative = value;
+            });
+            
+            if (maxCumulative > 0) {
+                data.cumulativeExpenditure = maxCumulative;
+                data.extractedFields.push('Cumulative Expenditure');
+            } else {
+                data.missingFields.push('Cumulative Expenditure');
+            }
+
+            // BALANCE AMOUNT
+            let balanceMatch = text.match(/balance\s+amount[^:]*:[^0-9]*(?:Rs\.?\s*)?([0-9,]+)/i);
+            if (balanceMatch) {
+                data.balanceAmount = balanceMatch[1].replace(/,/g, '');
+                data.extractedFields.push('Balance Amount');
+            }
+
+            // TOTAL RECEIVED
+            let receivedMatch = text.match(/sanctioned[^:]*:[^0-9]*(?:Rs\.?\s*)?([0-9,]+)/i);
+            if (!receivedMatch) receivedMatch = text.match(/Received[^:]*:[^0-9]*([0-9,]+)/i);
+            if (receivedMatch) {
+                data.totalReceived = receivedMatch[1].replace(/,/g, '');
+                data.extractedFields.push('Total Received');
+            }
+
+            // WORK ORDER DATE
+            let workOrderMatch = text.match(/Date\s+Of\s+Work\s+Order[:\s]*([0-9]{2}[-\/-][0-9]{2}[-\/-][0-9]{4})/i);
+            if (workOrderMatch) {
+                data.workOrderDate = workOrderMatch[1];
+                data.extractedFields.push('Work Order Date');
+            }
+
+            // ORIGINAL TIME LIMIT
+            let timeLimitMatch = text.match(/Original\s+Time\s+Limit\s+[Ii]n\s+Days[:\s]*([0-9]+)/i);
+            if (timeLimitMatch) {
+                data.originalTimeLimitDays = timeLimitMatch[1];
+                data.extractedFields.push('Original Time Limit');
+            }
+
+            // EXTENDED TIME LIMIT
+            let extendedMatch = text.match(/Extended\s+Time\s+Limit[^:]*:[^0-9]*([0-9]{2}[-\/-][0-9]{2}[-\/-][0-9]{4})/i);
+            if (extendedMatch) {
+                data.extendedTimeLimit = extendedMatch[1];
+                data.extractedFields.push('Extended Time Limit');
+            }
+
+            // EXPENDITURE DETAILS - ENHANCED TABLE PARSING
+            const lines = text.split('\n');
+            let inTableSection = false;
+            let tableHeaders = [];
+            
+            // First, try structured table extraction
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                
+                // Detect table start
+                if (line.match(/Financial\s+Year|Expenditure\s+Details|Payment\s+Details/i)) {
+                    inTableSection = true;
+                    // Try to get headers from next line
+                    if (i + 1 < lines.length) {
+                        const headerLine = lines[i + 1];
+                        if (headerLine.match(/RA\s+Bill|Date|Name|Amount|Remark/i)) {
+                            tableHeaders = headerLine.split(/\s{2,}|\t/).map(h => h.trim());
+                        }
+                    }
+                    continue;
+                }
+                
+                if (inTableSection && line.length > 20) {
+                    // Pattern 1: Standard table row with Financial Year
+                    let match = line.match(/(\d{4}-\d{4})\s+([^0-9]+?)\s+(\d{2}[-\/]\d{2}[-\/]\d{4})\s+(?:(\d+)\s+)?([^0-9]+?)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s+(.+)$/);
                     
-                    <form id="uploadForm" enctype="multipart/form-data">
-                        <div class="file-upload-wrapper">
-                            <input type="file" id="fileInput" name="file" accept=".xlsx,.xls" required>
-                            <label for="fileInput" class="file-upload-label">
-                                <span class="upload-icon">📤</span>
-                                <span id="fileName">Choose Excel File</span>
-                            </label>
+                    if (match) {
+                        const [, financialYear, billType, date, billNo, agencyName, billAmount, centage, cumulative, remark] = match;
+                        data.expenditureDetails.push({
+                            financialYear: financialYear.trim(),
+                            billType: billType.trim(),
+                            date: date.trim(),
+                            billNumber: billNo ? billNo.trim() : '',
+                            agencyName: agencyName.trim(),
+                            billAmount: billAmount.replace(/,/g, ''),
+                            centageAmount: centage.replace(/,/g, ''),
+                            cumulativeAmount: cumulative.replace(/,/g, ''),
+                            remark: remark.trim()
+                        });
+                        continue;
+                    }
+                    
+                    // Pattern 2: Without financial year, focus on date
+                    match = line.match(/(\d{2}[-\/]\d{2}[-\/]\d{4})\s+([^0-9]+?)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s+(.+)$/);
+                    if (match) {
+                        const [, date, agencyName, billAmount, centage, cumulative, remark] = match;
+                        data.expenditureDetails.push({
+                            date: date.trim(),
+                            agencyName: agencyName.trim(),
+                            billAmount: billAmount.replace(/,/g, ''),
+                            centageAmount: centage.replace(/,/g, ''),
+                            cumulativeAmount: cumulative.replace(/,/g, ''),
+                            remark: remark.trim()
+                        });
+                        continue;
+                    }
+                }
+            }
+
+            // Fallback: Simple date-amount pattern
+            if (data.expenditureDetails.length === 0) {
+                const simplePattern = /(\d{2}[-\/]\d{2}[-\/]\d{4})[^\d]+([\d,]+)[^\d]+([\d,]+)[^\n]*?([^\n]{10,100})/g;
+                let matches = [...text.matchAll(simplePattern)];
+                
+                matches.forEach((match, idx) => {
+                    data.expenditureDetails.push({
+                        date: match[1],
+                        billNumber: (idx + 1).toString(),
+                        agencyName: 'Extracted from text',
+                        billAmount: match[2].replace(/,/g, ''),
+                        cumulativeAmount: match[3].replace(/,/g, ''),
+                        remark: match[4].trim(),
+                        centageAmount: '0'
+                    });
+                });
+            }
+
+            if (data.expenditureDetails.length > 0) {
+                data.extractedFields.push(`${data.expenditureDetails.length} Bill(s)`);
+            } else {
+                data.missingFields.push('Bill Details');
+            }
+
+            // Calculate extraction quality
+            const criticalFields = ['workId', 'workName', 'aaAmount', 'cumulativeExpenditure'];
+            const importantFields = ['division', 'userDepartment', 'balanceAmount', 'workOrderDate'];
+            
+            let score = 0;
+            criticalFields.forEach(field => {
+                if (data[field]) score += 25;
+            });
+            importantFields.forEach(field => {
+                if (data[field]) score += 5;
+            });
+            if (data.expenditureDetails.length > 0) score += 20;
+            
+            data.extractionQuality = Math.min(100, Math.round(score));
+
+            return data;
+        }
+
+        // RED FLAG RULES (keeping the same as before)
+        const RED_FLAG_RULES = [
+            {
+                id: 1,
+                name: "Diversion of Funds",
+                description: "PW Manual Para 305: Savings from deposit work can only be used for other works with written request from user department.",
+                severity: 'high',
+                detect: (data) => {
+                    const flags = [];
+                    if (data.type === 'deposit_work' && data.expenditureDetails && data.expenditureDetails.length > 0) {
+                        data.expenditureDetails.forEach((item, index) => {
+                            if (item.remark && data.workName) {
+                                const remarkLower = item.remark.toLowerCase();
+                                const workLower = data.workName.toLowerCase();
+                                
+                                const workTerms = workLower.split(/\s+/).filter(w => w.length > 4 && 
+                                    !['water', 'work', 'works', 'road', 'roads', 'construction', 'village'].includes(w));
+                                
+                                const matchingTerms = workTerms.filter(term => remarkLower.includes(term));
+                                const matchRatio = workTerms.length > 0 ? matchingTerms.length / workTerms.length : 0;
+                                
+                                const diversionIndicators = ['unavoidable', 'different', 'other', 'emergency', 'urgent'];
+                                const hasDiversionIndicator = diversionIndicators.some(ind => remarkLower.includes(ind));
+                                
+                                if ((matchRatio < 0.3 && workTerms.length > 0) || hasDiversionIndicator) {
+                                    flags.push({
+                                        severity: 'high',
+                                        billNumber: index + 1,
+                                        details: {
+                                            'Sanctioned Work': data.workName,
+                                            'Actual Work (Bill Remark)': item.remark,
+                                            'Bill Amount': `₹ ${parseInt(item.billAmount || 0).toLocaleString('en-IN')}`,
+                                            'Bill Date': item.date || 'Not specified',
+                                            'Agency': item.agencyName || 'Not specified',
+                                            'Match Score': `${(matchRatio * 100).toFixed(0)}% (${matchingTerms.length}/${workTerms.length} terms)`,
+                                            'Red Flag Trigger': hasDiversionIndicator ? 'Diversion indicator words found' : 'Low work name similarity',
+                                            'Audit Reference': 'PW Manual Para 305',
+                                            'Required Action': 'Verify written permission from user department for fund diversion'
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                    }
+                    return flags;
+                }
+            },
+            {
+                id: 2,
+                name: "Unfruitful Survey Expenditure",
+                description: "Survey should lead to actual work. Survey expenses without construction indicate wasteful expenditure.",
+                severity: 'high',
+                detect: (data) => {
+                    const flags = [];
+                    if (data.expenditureDetails && data.expenditureDetails.length > 0) {
+                        const surveyBills = data.expenditureDetails.filter(item => 
+                            item.remark && item.remark.toLowerCase().includes('survey')
+                        );
+                        
+                        const constructionBills = data.expenditureDetails.filter(item => 
+                            item.remark && (
+                                item.remark.toLowerCase().includes('improvement') ||
+                                item.remark.toLowerCase().includes('construction') ||
+                                item.remark.toLowerCase().includes('completed') ||
+                                item.remark.toLowerCase().includes('subgrade')
+                            )
+                        );
+                        
+                        if (surveyBills.length > 0 && constructionBills.length === 0) {
+                            const totalSurvey = surveyBills.reduce((sum, b) => sum + parseInt(b.billAmount || 0), 0);
+                            
+                            flags.push({
+                                severity: 'high',
+                                details: {
+                                    'Work Name': data.workName,
+                                    'Survey Bills Found': surveyBills.length,
+                                    'Construction Bills Found': '0',
+                                    'Total Survey Expenditure': `₹ ${totalSurvey.toLocaleString('en-IN')}`,
+                                    'Survey Bill Dates': surveyBills.map(b => b.date).join(', '),
+                                    'Red Flag Reason': 'Survey conducted but no actual construction started',
+                                    'Implication': 'Unfruitful expenditure - money spent without achieving work objectives',
+                                    'Required Action': 'Investigate why construction was not undertaken after survey'
+                                }
+                            });
+                        }
+                    }
+                    return flags;
+                }
+            },
+            {
+                id: 3,
+                name: "Excess Expenditure Without Approval",
+                description: "Expenditure exceeding AA by more than 10% requires government approval.",
+                severity: 'critical',
+                detect: (data) => {
+                    const flags = [];
+                    if (data.aaAmount && data.cumulativeExpenditure) {
+                        const aa = parseInt(data.aaAmount);
+                        const expense = parseInt(data.cumulativeExpenditure);
+                        const threshold = aa * 1.10;
+                        
+                        if (expense > threshold) {
+                            const excess = expense - aa;
+                            const excessPercent = ((excess / aa) * 100).toFixed(2);
+                            
+                            flags.push({
+                                severity: 'critical',
+                                details: {
+                                    'Work Name': data.workName,
+                                    'AA Amount': `₹ ${aa.toLocaleString('en-IN')}`,
+                                    'Current Expenditure': `₹ ${expense.toLocaleString('en-IN')}`,
+                                    'Allowed 10% Excess': `₹ ${(aa * 0.10).toLocaleString('en-IN')}`,
+                                    'Maximum Allowed': `₹ ${threshold.toLocaleString('en-IN')}`,
+                                    'Actual Excess': `₹ ${excess.toLocaleString('en-IN')} (${excessPercent}%)`,
+                                    'Red Flag Reason': `Expenditure ${excessPercent}% over AA (allowed: 10%)`,
+                                    'Required Action': 'Obtain government approval for expenditure exceeding 110% of AA',
+                                    'Financial Irregularity': 'YES - Unapproved excess expenditure'
+                                }
+                            });
+                        }
+                    }
+                    return flags;
+                }
+            },
+            {
+                id: 4,
+                name: "Delay in Work Completion",
+                description: "Work must be completed within stipulated contract period.",
+                severity: 'high',
+                detect: (data) => {
+                    const flags = [];
+                    const today = new Date('2026-02-02');
+                    let completionDate = null;
+                    
+                    if (data.extendedTimeLimit) {
+                        const parts = data.extendedTimeLimit.split(/[-\/]/);
+                        completionDate = new Date(parts[2], parts[1] - 1, parts[0]);
+                    } else if (data.workOrderDate && data.originalTimeLimitDays) {
+                        const parts = data.workOrderDate.split(/[-\/]/);
+                        const start = new Date(parts[2], parts[1] - 1, parts[0]);
+                        completionDate = new Date(start.setDate(start.getDate() + parseInt(data.originalTimeLimitDays)));
+                    }
+                    
+                    if (completionDate && today > completionDate) {
+                        const delayDays = Math.floor((today - completionDate) / (1000 * 60 * 60 * 24));
+                        
+                        flags.push({
+                            severity: 'high',
+                            details: {
+                                'Work Name': data.workName,
+                                'Stipulated Completion': completionDate.toLocaleDateString('en-IN'),
+                                'Current Date': today.toLocaleDateString('en-IN'),
+                                'Delay': `${delayDays} days (${(delayDays / 30).toFixed(1)} months)`,
+                                'Red Flag Reason': 'Work not completed within contract period',
+                                'Implication': 'Time and cost overrun, delayed public benefit'
+                            }
+                        });
+                    }
+                    return flags;
+                }
+            },
+            {
+                id: 5,
+                name: "Non-Recovery of Centage Charges",
+                description: "5% centage charges must be recovered on all deposit works as per MPW Manual.",
+                severity: 'medium',
+                detect: (data) => {
+                    const flags = [];
+                    if (data.type === 'deposit_work' && data.expenditureDetails && data.expenditureDetails.length > 0) {
+                        let violations = 0;
+                        let totalBill = 0;
+                        let totalCentage = 0;
+                        
+                        data.expenditureDetails.forEach(item => {
+                            const bill = parseInt(item.billAmount || 0);
+                            const centage = parseInt(item.centageAmount || 0);
+                            totalBill += bill;
+                            totalCentage += centage;
+                            
+                            if (bill > 0 && centage < bill * 0.05 * 0.9) {
+                                violations++;
+                            }
+                        });
+                        
+                        if (violations > 0) {
+                            const expected = totalBill * 0.05;
+                            const shortfall = expected - totalCentage;
+                            
+                            flags.push({
+                                severity: 'medium',
+                                details: {
+                                    'Work Name': data.workName,
+                                    'Work Type': 'Deposit Work',
+                                    'Total Bills': data.expenditureDetails.length,
+                                    'Bills with Violation': violations,
+                                    'Total Bill Amount': `₹ ${totalBill.toLocaleString('en-IN')}`,
+                                    'Expected Centage (5%)': `₹ ${expected.toLocaleString('en-IN')}`,
+                                    'Actually Recovered': `₹ ${totalCentage.toLocaleString('en-IN')}`,
+                                    'Shortfall': `₹ ${shortfall.toLocaleString('en-IN')}`,
+                                    'Red Flag Reason': `Centage not recovered on ${violations} bill(s)`,
+                                    'Revenue Loss': `₹ ${shortfall.toLocaleString('en-IN')}`,
+                                    'Required Action': 'Recover centage charges from user department'
+                                }
+                            });
+                        }
+                    }
+                    return flags;
+                }
+            },
+            {
+                id: 6,
+                name: "Unspent Balance Not Returned",
+                description: "Unspent deposit amounts must be returned to user department after work completion.",
+                severity: 'high',
+                detect: (data) => {
+                    const flags = [];
+                    if (data.type === 'deposit_work' && data.balanceAmount) {
+                        const balance = parseInt(data.balanceAmount);
+                        
+                        if (balance > 100000) {
+                            const hasCompleted = data.expenditureDetails?.some(item => 
+                                item.remark && item.remark.toLowerCase().includes('completed')
+                            );
+                            
+                            if (hasCompleted) {
+                                flags.push({
+                                    severity: 'high',
+                                    details: {
+                                        'Work Name': data.workName,
+                                        'User Department': data.userDepartment || 'Not specified',
+                                        'Balance with DDO': `₹ ${balance.toLocaleString('en-IN')}`,
+                                        'Work Status': 'Completed',
+                                        'Red Flag Reason': 'Unspent balance not returned after work completion',
+                                        'Implication': 'User department funds unnecessarily blocked',
+                                        'Required Action': 'Return unspent amount to user department immediately'
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    return flags;
+                }
+            }
+        ];
+
+        async function parseDocument(file) {
+            const fileType = file.name.toLowerCase();
+            if (fileType.endsWith('.pdf')) {
+                return await parsePDF(file);
+            } else if (fileType.endsWith('.docx')) {
+                return await parseDOCX(file);
+            }
+            throw new Error('Unsupported file type');
+        }
+
+        async function parsePDF(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            
+            let fullText = '';
+            let pageTexts = [];
+            
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(' ');
+                pageTexts.push({ page: i, text: pageText });
+                fullText += pageText + '\n\n';
+            }
+            
+            return extractDataFromText(fullText, file.name, pageTexts);
+        }
+
+        async function parseDOCX(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const result = await mammoth.extractRawText({ arrayBuffer });
+            return extractDataFromText(result.value, file.name, [{ page: 1, text: result.value }]);
+        }
+
+        // Main App Component
+        function App() {
+            const [files, setFiles] = useState([]);
+            const [processing, setProcessing] = useState(false);
+            const [currentFile, setCurrentFile] = useState(null);
+            const [progress, setProgress] = useState(0);
+            const [results, setResults] = useState([]);
+            const [dragging, setDragging] = useState(false);
+            const [excelFile, setExcelFile] = useState(null);
+            const [excelFormats, setExcelFormats] = useState({ excel: true, pdf: true });
+            const [excelLoading, setExcelLoading] = useState(false);
+            const [excelResult, setExcelResult] = useState(null);
+            const [excelError, setExcelError] = useState(null);
+            const fileInputRef = useRef(null);
+            const excelInputRef = useRef(null);
+
+            const handleFileSelect = (e) => {
+                const selectedFiles = Array.from(e.target.files);
+                setFiles(prev => [...prev, ...selectedFiles]);
+            };
+
+            const handleExcelSelect = (e) => {
+                const selected = e.target.files[0];
+                setExcelFile(selected || null);
+                setExcelResult(null);
+                setExcelError(null);
+            };
+
+            const handleDragOver = (e) => {
+                e.preventDefault();
+                setDragging(true);
+            };
+
+            const handleDragLeave = () => {
+                setDragging(false);
+            };
+
+            const handleDrop = (e) => {
+                e.preventDefault();
+                setDragging(false);
+                const droppedFiles = Array.from(e.dataTransfer.files);
+                setFiles(prev => [...prev, ...droppedFiles]);
+            };
+
+            const analyzeExcel = async () => {
+                if (!excelFile) {
+                    setExcelError('Please select an Excel file.');
+                    return;
+                }
+
+                const formats = Object.entries(excelFormats)
+                    .filter(([_, selected]) => selected)
+                    .map(([format]) => format);
+
+                if (formats.length === 0) {
+                    setExcelError('Select at least one output format.');
+                    return;
+                }
+
+                setExcelLoading(true);
+                setExcelError(null);
+
+                const formData = new FormData();
+                formData.append('file', excelFile);
+                formats.forEach(format => formData.append('formats', format));
+
+                try {
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const result = await response.json();
+
+                    if (!result.success) {
+                        throw new Error(result.error || 'Analysis failed.');
+                    }
+
+                    setExcelResult(result);
+                } catch (error) {
+                    setExcelError(error.message);
+                } finally {
+                    setExcelLoading(false);
+                }
+            };
+
+            const analyzeDocuments = async () => {
+                setProcessing(true);
+                setResults([]);
+                
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    setCurrentFile(file.name);
+                    setProgress((i / files.length) * 100);
+                    
+                    try {
+                        const data = await parseDocument(file);
+                        const detectedFlags = [];
+
+                        RED_FLAG_RULES.forEach(rule => {
+                            const flags = rule.detect(data);
+                            flags.forEach(flag => {
+                                detectedFlags.push({
+                                    ruleId: rule.id,
+                                    ruleName: rule.name,
+                                    description: rule.description,
+                                    severity: rule.severity,
+                                    ...flag
+                                });
+                            });
+                        });
+
+                        setResults(prev => [...prev, {
+                            fileName: file.name,
+                            extractedData: data,
+                            flags: detectedFlags
+                        }]);
+                    } catch (error) {
+                        setResults(prev => [...prev, {
+                            fileName: file.name,
+                            error: error.message,
+                            flags: []
+                        }]);
+                    }
+                }
+                
+                setProgress(100);
+                setProcessing(false);
+            };
+
+            const exportExcelReport = () => {
+                const summaryRows = results.map(doc => ({
+                    File: doc.fileName,
+                    Work: doc.extractedData?.workName || 'N/A',
+                    Type: doc.extractedData?.type || 'N/A',
+                    'AA Amount': doc.extractedData?.aaAmount || 'N/A',
+                    'Cumulative Expenditure': doc.extractedData?.cumulativeExpenditure || 'N/A',
+                    'Red Flags': doc.flags?.length || 0,
+                    'Extraction Quality': `${doc.extractedData?.extractionQuality || 0}%`
+                }));
+
+                const flagRows = [];
+                results.forEach(doc => {
+                    doc.flags.forEach(flag => {
+                        flagRows.push({
+                            File: doc.fileName,
+                            Rule: flag.ruleName,
+                            Severity: flag.severity,
+                            Details: Object.entries(flag.details || {})
+                                .map(([k, v]) => `${k}: ${v}`)
+                                .join(' | ')
+                        });
+                    });
+                });
+
+                const workbook = XLSX.utils.book_new();
+                const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+                XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+
+                if (flagRows.length > 0) {
+                    const flagSheet = XLSX.utils.json_to_sheet(flagRows);
+                    XLSX.utils.book_append_sheet(workbook, flagSheet, 'Red Flags');
+                }
+
+                XLSX.writeFile(workbook, `PWD_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
+            };
+
+            const exportPdfReport = () => {
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF();
+
+                pdf.setFontSize(16);
+                pdf.text('PWD Red Flag Detection Report', 14, 20);
+                pdf.setFontSize(10);
+                pdf.text(`Generated: ${new Date().toLocaleString('en-IN')}`, 14, 28);
+
+                let y = 40;
+                results.forEach((doc, idx) => {
+                    if (y > 260) {
+                        pdf.addPage();
+                        y = 20;
+                    }
+                    pdf.setFontSize(12);
+                    pdf.text(`Document ${idx + 1}: ${doc.fileName}`, 14, y);
+                    y += 6;
+                    pdf.setFontSize(10);
+                    pdf.text(`Work: ${doc.extractedData?.workName || 'N/A'}`, 14, y);
+                    y += 5;
+                    pdf.text(`Red Flags: ${doc.flags?.length || 0}`, 14, y);
+                    y += 6;
+
+                    doc.flags.forEach(flag => {
+                        if (y > 270) {
+                            pdf.addPage();
+                            y = 20;
+                        }
+                        pdf.text(`- ${flag.ruleName} (${flag.severity})`, 16, y);
+                        y += 5;
+                    });
+
+                    y += 6;
+                });
+
+                pdf.save(`PWD_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+            };
+
+            return (
+                <div className="container">
+                    <div className="header">
+                        <h1> PWD Red Flag Detection</h1>
+                        <p>Enhanced Extraction & Analysis System</p>
+                    </div>
+
+                    <div className="upload-grid">
+                        <div className="upload-section">
+                            <h2 style={{ marginBottom: '12px' }}>Excel Red Flag Analyzer</h2>
+                            <p style={{ marginBottom: '20px', color: '#666' }}>
+                                Upload Excel sheets for automated red flag analysis and download Excel/PDF reports.
+                            </p>
+                            <button className="upload-button" onClick={() => excelInputRef.current?.click()}>
+                                Select Excel File
+                            </button>
+                            <input
+                                ref={excelInputRef}
+                                type="file"
+                                className="file-input"
+                                accept=".xlsx,.xls"
+                                onChange={handleExcelSelect}
+                            />
+                            <p style={{ marginTop: '12px', color: '#666' }}>
+                                {excelFile ? excelFile.name : 'No file selected'}
+                            </p>
+
+                            <div className="format-selection">
+                                <strong>Output Formats</strong>
+                                <div className="checkbox-group">
+                                    <label className="checkbox-label">
+                                        <input
+                                            type="checkbox"
+                                            checked={excelFormats.excel}
+                                            onChange={(e) => setExcelFormats(prev => ({ ...prev, excel: e.target.checked }))}
+                                        />
+                                        Excel Report
+                                    </label>
+                                    <label className="checkbox-label">
+                                        <input
+                                            type="checkbox"
+                                            checked={excelFormats.pdf}
+                                            onChange={(e) => setExcelFormats(prev => ({ ...prev, pdf: e.target.checked }))}
+                                        />
+                                        PDF Report
+                                    </label>
+                                </div>
+                            </div>
+
+                            <button
+                                className="upload-button"
+                                style={{ marginTop: '16px' }}
+                                onClick={analyzeExcel}
+                                disabled={excelLoading}
+                            >
+                                {excelLoading ? 'Analyzing...' : 'Analyze Excel'}
+                            </button>
+
+                            {excelError && (
+                                <p style={{ marginTop: '12px', color: '#FF6B6B' }}>{excelError}</p>
+                            )}
                         </div>
 
-                        <div class="format-selection">
-                            <h3>Output Formats:</h3>
-                            <div class="checkbox-group">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" name="formats" value="excel" checked>
-                                    <span>Excel Report</span>
-                                </label>
-                                <label class="checkbox-label">
-                                    <input type="checkbox" name="formats" value="html" checked>
-                                    <span>HTML Report</span>
-                                </label>
-                                <label class="checkbox-label">
-                                    <input type="checkbox" name="formats" value="json">
-                                    <span>JSON Data</span>
-                                </label>
+                        <div
+                            className={`upload-section ${dragging ? 'dragging' : ''}`}
+                            onDragOver={handleDragOver}
+                            onDragLeave={handleDragLeave}
+                            onDrop={handleDrop}
+                        >
+                            <h2 style={{ marginBottom: '12px' }}>PDF/DOCX Red Flag Analyzer</h2>
+                            <p style={{ marginBottom: '20px', color: '#666' }}>
+                                Drag & drop PDF/DOCX files for instant extraction and analysis.
+                            </p>
+                            <button className="upload-button" onClick={() => fileInputRef.current?.click()}>
+                                Select PDF/DOCX Files
+                            </button>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                className="file-input"
+                                multiple
+                                accept=".pdf,.docx"
+                                onChange={handleFileSelect}
+                            />
+                            <p style={{ marginTop: '20px', color: '#666' }}>
+                                or drag and drop here
+                            </p>
+                        </div>
+                    </div>
+
+                    {excelResult && (
+                        <div className="excel-results">
+                            <div className="section-title">Excel Analysis Results</div>
+                            <div className="data-grid">
+                                <div className="data-item">
+                                    <div className="data-label">Total Records</div>
+                                    <div className="data-value">{excelResult.summary?.total_records || 0}</div>
+                                </div>
+                                <div className="data-item">
+                                    <div className="data-label">Red Flags</div>
+                                    <div className="data-value">{excelResult.summary?.red_flagged || 0}</div>
+                                </div>
+                                <div className="data-item">
+                                    <div className="data-label">Green Flags</div>
+                                    <div className="data-value">{excelResult.summary?.green_flagged || 0}</div>
+                                </div>
+                            </div>
+
+                            <div className="download-grid">
+                                {excelResult.output_files && Object.entries(excelResult.output_files).map(([format, info]) => (
+                                    <a key={format} href={info.url} className="download-btn" download>
+                                        Download {format.toUpperCase()}
+                                    </a>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {files.length > 0 && results.length === 0 && !processing && (
+                        <div style={{ background: '#FFF5F0', padding: '20px', borderRadius: '12px', marginBottom: '24px' }}>
+                            <h3>Files Ready ({files.length})</h3>
+                            {files.map((file, i) => (
+                                <div key={i} style={{ padding: '8px', background: '#fff', margin: '8px 0', borderRadius: '6px' }}>
+                                    {file.name}
+                                </div>
+                            ))}
+                            <button 
+                                className="upload-button"
+                                onClick={analyzeDocuments}
+                                style={{ marginTop: '16px', fontSize: '18px', padding: '16px 48px' }}
+                            >
+                                Analyze All Documents
+                            </button>
+                        </div>
+                    )}
+
+                    {processing && (
+                        <div className="processing">
+                            <div className="spinner"></div>
+                            <p><strong>Processing:</strong> {currentFile}</p>
+                            <div className="progress-bar">
+                                <div className="progress-fill" style={{ width: `${progress}%` }}></div>
+                            </div>
+                        </div>
+                    )}
+
+                    {results.length > 0 && (
+                        <>
+                            <div className="export-section">
+                                <button className="export-button" onClick={exportExcelReport}>
+                                    Export Excel Report
+                                </button>
+                                <button className="export-button" onClick={exportPdfReport}>
+                                    Export PDF Report
+                                </button>
+                                <button 
+                                    className="export-button secondary" 
+                                    onClick={() => { setResults([]); setFiles([]); }}
+                                >
+                                    New Analysis
+                                </button>
+                            </div>
+
+                            {results.map((doc, idx) => (
+                                <DocumentAnalysis key={idx} doc={doc} />
+                            ))}
+                        </>
+                    )}
+                </div>
+            );
+        }
+
+        function DocumentAnalysis({ doc }) {
+            const [showRawText, setShowRawText] = useState(false);
+            const [showBills, setShowBills] = useState(false);
+
+            const data = doc.extractedData;
+            const qualityClass = data.extractionQuality >= 80 ? 'excellent' : 
+                                 data.extractionQuality >= 60 ? 'good' :
+                                 data.extractionQuality >= 40 ? 'fair' : 'poor';
+
+            return (
+                <div className="document-analysis">
+                    <div className="doc-header">
+                        <div className="doc-title">
+                             {doc.fileName}
+                        </div>
+                        <div style={{ marginTop: '8px' }}>
+                            <span className={`extraction-quality ${qualityClass}`}>
+                                Extraction: {data.extractionQuality}%
+                            </span>
+                            {doc.flags.length === 0 ? (
+                                <span className="summary-badge clean">✓ Compliant</span>
+                            ) : (
+                                <span className="summary-badge">⚠ {doc.flags.length} Red Flags</span>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="section">
+                        <div className="section-title">Extracted Data</div>
+                        
+                        <div className="data-grid">
+                            <div className="data-item">
+                                <div className="data-label">Work ID</div>
+                                <div className="data-value">{data.workId || data.depositWorkId || 'Not found'}</div>
+                            </div>
+                            <div className="data-item">
+                                <div className="data-label">Type</div>
+                                <div className="data-value">{data.type === 'deposit_work' ? 'Deposit' : 'Capital'}</div>
+                            </div>
+                            <div className="data-item">
+                                <div className="data-label">Division</div>
+                                <div className="data-value">{data.division || 'Not found'}</div>
                             </div>
                         </div>
 
-                        <button type="submit" class="btn btn-primary" id="analyzeBtn">
-                            <span class="btn-text">Analyze File</span>
-                            <span class="btn-icon">→</span>
+                        <div style={{ marginTop: '16px' }}>
+                            <div className="data-item">
+                                <div className="data-label">Work Name</div>
+                                <div className="data-value">{data.workName || 'Not found'}</div>
+                            </div>
+                        </div>
+
+
+                        <div className="extraction-debug">
+                            <div className="debug-title">Extraction Status</div>
+                            <div>
+                                <strong>Found:</strong>{' '}
+                                {data.extractedFields.map((f, i) => (
+                                    <span key={i} className="field-status found">{f}</span>
+                                ))}
+                            </div>
+                            {data.missingFields.length > 0 && (
+                                <div style={{ marginTop: '8px' }}>
+                                    <strong>Missing:</strong>{' '}
+                                    {data.missingFields.map((f, i) => (
+                                        <span key={i} className="field-status missing">{f}</span>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {data.expenditureDetails.length > 0 && (
+                            <div style={{ marginTop: '16px' }}>
+                                <button className="toggle-button" onClick={() => setShowBills(!showBills)}>
+                                    {showBills ? '▼' : '▶'} Bills ({data.expenditureDetails.length})
+                                </button>
+                                <div className={`collapsible ${showBills ? 'open' : ''}`}>
+                                    <table className="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>Date</th>
+                                                <th>Agency</th>
+                                                <th>Amount</th>
+                                                <th>Cumulative</th>
+                                                <th>Remark</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {data.expenditureDetails.map((bill, i) => (
+                                                <tr key={i}>
+                                                    <td>{i + 1}</td>
+                                                    <td>{bill.date}</td>
+                                                    <td>{bill.agencyName}</td>
+                                                    <td>₹ {parseInt(bill.billAmount || 0).toLocaleString('en-IN')}</td>
+                                                    <td>₹ {parseInt(bill.cumulativeAmount || 0).toLocaleString('en-IN')}</td>
+                                                    <td>{bill.remark}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        <button className="toggle-button" onClick={() => setShowRawText(!showRawText)}>
+                            {showRawText ? '▼' : '▶'} Raw Text
                         </button>
-                    </form>
-                </div>
-
-                <!-- Loading Indicator -->
-                <div class="loading-overlay" id="loadingOverlay">
-                    <div class="spinner"></div>
-                    <p>Analyzing your file... This may take a few moments.</p>
-                </div>
-            </section>
-
-            <!-- Results Section -->
-            <section class="results-section hidden" id="resultsSection">
-                <div class="card">
-                    <h2>📊 Analysis Results</h2>
-                    
-                    <!-- Summary Cards -->
-                    <div class="summary-grid" id="summaryGrid">
-                        <!-- Cards will be inserted here by JavaScript -->
-                    </div>
-
-                    <!-- Data Quality -->
-                    <div class="quality-section" id="qualitySection">
-                        <!-- Quality info will be inserted here -->
-                    </div>
-
-                    <!-- Download Links -->
-                    <div class="download-section" id="downloadSection">
-                        <h3>📥 Download Reports</h3>
-                        <div class="download-grid" id="downloadGrid">
-                            <!-- Download links will be inserted here -->
+                        <div className={`collapsible ${showRawText ? 'open' : ''}`}>
+                            <div className="raw-text">{data.rawText}</div>
                         </div>
                     </div>
 
-                    <!-- New Analysis Button -->
-                    <button class="btn btn-secondary" onclick="resetForm()">
-                        ← Analyze Another File
-                    </button>
-                </div>
-            </section>
-
-            <!-- Red Flag Criteria Information -->
-            <section class="info-section">
-                <div class="card">
-                    <h2>ℹ️ Red Flag Criteria</h2>
-                    <div class="criteria-grid">
-                        <div class="criterion">
-                            <div class="criterion-number">1</div>
-                            <div class="criterion-content">
-                                <h4>Diversion of Funds</h4>
-                                <p>Checks if deposit work funds are diverted to other works without written request</p>
+                    <div className="section">
+                        <div className="section-title"> Red Flags ({doc.flags.length})</div>
+                        
+                        {doc.flags.length === 0 ? (
+                            <div className="no-flags">
+                                <div className="no-flags-icon"></div>
+                                <div style={{ fontSize: '18px', fontWeight: '600', color: '#2E7D32' }}>
+                                    No Red Flags - Document Compliant
+                                </div>
                             </div>
-                        </div>
-                        <div class="criterion">
-                            <div class="criterion-number">2</div>
-                            <div class="criterion-content">
-                                <h4>Wasteful Survey Expenditure</h4>
-                                <p>Identifies improper survey work expenditure with nil payments for other items</p>
-                            </div>
-                        </div>
-                        <div class="criterion">
-                            <div class="criterion-number">3</div>
-                            <div class="criterion-content">
-                                <h4>Excess Expenditure</h4>
-                                <p>Detects expenditure exceeding Administrative Approval by more than 10%</p>
-                            </div>
-                        </div>
-                        <div class="criterion">
-                            <div class="criterion-number">4</div>
-                            <div class="criterion-content">
-                                <h4>Overlapping Works</h4>
-                                <p>Finds maintenance works overlapping with ongoing projects during DLP</p>
-                            </div>
-                        </div>
-                        <div class="criterion">
-                            <div class="criterion-number">5</div>
-                            <div class="criterion-content">
-                                <h4>Delay in Completion</h4>
-                                <p>Identifies works not completed within stipulated time period</p>
-                            </div>
-                        </div>
-                        <div class="criterion">
-                            <div class="criterion-number">6</div>
-                            <div class="criterion-content">
-                                <h4>Splitting of Works</h4>
-                                <p>Detects artificially split works to avoid e-tendering (multiple <₹10 lakh)</p>
-                            </div>
-                        </div>
-                        <div class="criterion">
-                            <div class="criterion-number">7</div>
-                            <div class="criterion-content">
-                                <h4>Non-recovery of Centage</h4>
-                                <p>Checks for non-recovery of 5% centage charges on deposit works</p>
-                            </div>
-                        </div>
-                        <div class="criterion">
-                            <div class="criterion-number">8</div>
-                            <div class="criterion-content">
-                                <h4>Unspent Balance</h4>
-                                <p>Identifies unspent deposits (>₹1 lakh) not returned after work completion</p>
-                            </div>
-                        </div>
+                        ) : (
+                            doc.flags.map((flag, i) => (
+                                <div key={i} className={`flag-alert ${flag.severity}`}>
+                                    <div className="flag-header">
+                                        <div className="flag-icon">⚠</div>
+                                        <div className="flag-info">
+                                            <div className="flag-name">{flag.ruleName}</div>
+                                            <div className="flag-description">{flag.description}</div>
+                                        </div>
+                                        <div className={`flag-severity ${flag.severity}`}>{flag.severity}</div>
+                                    </div>
+                                    <div className="flag-evidence">
+                                        <div className="evidence-title">Evidence</div>
+                                        {Object.entries(flag.details).map(([k, v], j) => (
+                                            <div key={j} className="evidence-item">
+                                                <div className="evidence-label">{k}</div>
+                                                <div className="evidence-value">{v}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))
+                        )}
                     </div>
                 </div>
-            </section>
-        </main>
+            );
+        }
 
-        <!-- Footer -->
-        <footer class="footer">
-            <p>&copy; 2026 PWD Audit Analysis System | Developed for Public Works Department</p>
-            <p class="footer-note">This system automates red flag detection based on audit criteria</p>
-        </footer>
-    </div>
-
-    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+    {% endraw %}
 </body>
 </html>
