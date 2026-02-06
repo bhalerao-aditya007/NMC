@@ -533,6 +533,75 @@
     <script type="text/babel">
         const { useState, useRef } = React;
 
+        const normalizeKey = (value) =>
+            String(value || '')
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, '');
+
+        const toNumber = (value) => {
+            if (value === null || value === undefined) return null;
+            const cleaned = String(value).replace(/[,₹\s]/g, '');
+            const num = parseFloat(cleaned);
+            return Number.isFinite(num) ? num : null;
+        };
+
+        const toDateValue = (value) => {
+            if (!value) return null;
+            if (value instanceof Date) return value;
+            if (typeof value === 'number' && window.XLSX?.SSF?.parse_date_code) {
+                const parsed = XLSX.SSF.parse_date_code(value);
+                if (parsed) {
+                    return new Date(parsed.y, parsed.m - 1, parsed.d);
+                }
+            }
+            if (typeof value === 'string') {
+                const parts = value.split(/[-\/]/);
+                if (parts.length >= 3) {
+                    return new Date(parts[2], parts[1] - 1, parts[0]);
+                }
+                const parsed = new Date(value);
+                return Number.isNaN(parsed.getTime()) ? null : parsed;
+            }
+            return null;
+        };
+
+        const extractRoadNumber = (workName) => {
+            if (!workName) return null;
+            const patterns = [
+                { regex: /SH-?\s*(\d+)/i, prefix: 'SH' },
+                { regex: /MDR-?\s*(\d+)/i, prefix: 'MDR' },
+                { regex: /NH-?\s*(\d+)/i, prefix: 'NH' }
+            ];
+            for (const { regex, prefix } of patterns) {
+                const match = workName.match(regex);
+                if (match) {
+                    return `${prefix}${match[1]}`;
+                }
+            }
+            return null;
+        };
+
+        const buildLineText = (items) => {
+            const rows = {};
+            items.forEach((item) => {
+                const y = Math.round(item.transform[5]);
+                const x = item.transform[4];
+                if (!rows[y]) rows[y] = [];
+                rows[y].push({ x, text: item.str });
+            });
+            return Object.keys(rows)
+                .sort((a, b) => b - a)
+                .map((y) =>
+                    rows[y]
+                        .sort((a, b) => a.x - b.x)
+                        .map((entry) => entry.text)
+                        .join(' ')
+                        .trim()
+                )
+                .filter(Boolean)
+                .join('\n');
+        };
+
         // Enhanced extraction with multiple fallback patterns
         function extractDataFromText(text, fileName, pageTexts) {
             const data = {
@@ -818,6 +887,9 @@
             }
 
             if (data.expenditureDetails.length > 0) {
+                data.expenditureDetails = data.expenditureDetails.filter((item) =>
+                    item.billAmount || item.remark || item.date
+                );
                 data.extractedFields.push(`${data.expenditureDetails.length} Bill(s)`);
             } else {
                 data.missingFields.push('Bill Details');
@@ -841,250 +913,344 @@
             return data;
         }
 
-        // RED FLAG RULES (keeping the same as before)
-        const RED_FLAG_RULES = [
-            {
-                id: 1,
-                name: "Diversion of Funds",
-                description: "PW Manual Para 305: Savings from deposit work can only be used for other works with written request from user department.",
-                severity: 'high',
-                detect: (data) => {
-                    const flags = [];
-                    if (data.type === 'deposit_work' && data.expenditureDetails && data.expenditureDetails.length > 0) {
-                        data.expenditureDetails.forEach((item, index) => {
-                            if (item.remark && data.workName) {
-                                const remarkLower = item.remark.toLowerCase();
-                                const workLower = data.workName.toLowerCase();
-                                
-                                const workTerms = workLower.split(/\s+/).filter(w => w.length > 4 && 
-                                    !['water', 'work', 'works', 'road', 'roads', 'construction', 'village'].includes(w));
-                                
-                                const matchingTerms = workTerms.filter(term => remarkLower.includes(term));
-                                const matchRatio = workTerms.length > 0 ? matchingTerms.length / workTerms.length : 0;
-                                
-                                const diversionIndicators = ['unavoidable', 'different', 'other', 'emergency', 'urgent'];
-                                const hasDiversionIndicator = diversionIndicators.some(ind => remarkLower.includes(ind));
-                                
-                                if ((matchRatio < 0.3 && workTerms.length > 0) || hasDiversionIndicator) {
-                                    flags.push({
-                                        severity: 'high',
-                                        billNumber: index + 1,
-                                        details: {
-                                            'Sanctioned Work': data.workName,
-                                            'Actual Work (Bill Remark)': item.remark,
-                                            'Bill Amount': `₹ ${parseInt(item.billAmount || 0).toLocaleString('en-IN')}`,
-                                            'Bill Date': item.date || 'Not specified',
-                                            'Agency': item.agencyName || 'Not specified',
-                                            'Match Score': `${(matchRatio * 100).toFixed(0)}% (${matchingTerms.length}/${workTerms.length} terms)`,
-                                            'Red Flag Trigger': hasDiversionIndicator ? 'Diversion indicator words found' : 'Low work name similarity',
-                                            'Audit Reference': 'PW Manual Para 305',
-                                            'Required Action': 'Verify written permission from user department for fund diversion'
-                                        }
-                                    });
-                                }
-                            }
-                        });
-                    }
-                    return flags;
+        const parseExcelFile = async (file) => {
+            const arrayBuffer = await file.arrayBuffer();
+            const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+            const headerMap = {
+                workId: ['workid', 'workidno', 'workidnumber'],
+                depositWorkId: ['depositworkid', 'depositid'],
+                budgetItemNo: ['budgetitemno', 'budgetitemnumber', 'budgetitem'],
+                nameOfWork: ['nameofthework', 'nameofwork', 'workname'],
+                aaAmount: ['administrativeapprovalcostlakh', 'aaamount', 'aaamountinrupees'],
+                totalExpenditure: ['totalexpenditurelakhs', 'totalexpenditure', 'cumulativeexpenditure'],
+                contractCost: ['contractagreementcostlakh', 'contractamount', 'contractcost'],
+                workOrderDate: ['dateofwork_order', 'dateofworkorder', 'workorderdate'],
+                timeLimit: ['originaltimelimitindays', 'timelimitdays'],
+                roadCategory: ['roadcategory'],
+                chainageFrom: ['chainagefrom', 'fromkm'],
+                chainageTo: ['chainageto', 'tokm'],
+                contractorName: ['contractorname', 'agencyname', 'contractor']
+            };
+
+            const resolveField = (row, keys) => {
+                const normalizedKeys = Object.keys(row).reduce((acc, key) => {
+                    acc[normalizeKey(key)] = key;
+                    return acc;
+                }, {});
+                for (const key of keys) {
+                    if (normalizedKeys[key]) return row[normalizedKeys[key]];
                 }
-            },
-            {
-                id: 2,
-                name: "Unfruitful Survey Expenditure",
-                description: "Survey should lead to actual work. Survey expenses without construction indicate wasteful expenditure.",
-                severity: 'high',
-                detect: (data) => {
-                    const flags = [];
-                    if (data.expenditureDetails && data.expenditureDetails.length > 0) {
-                        const surveyBills = data.expenditureDetails.filter(item => 
-                            item.remark && item.remark.toLowerCase().includes('survey')
-                        );
-                        
-                        const constructionBills = data.expenditureDetails.filter(item => 
-                            item.remark && (
-                                item.remark.toLowerCase().includes('improvement') ||
-                                item.remark.toLowerCase().includes('construction') ||
-                                item.remark.toLowerCase().includes('completed') ||
-                                item.remark.toLowerCase().includes('subgrade')
-                            )
-                        );
-                        
-                        if (surveyBills.length > 0 && constructionBills.length === 0) {
-                            const totalSurvey = surveyBills.reduce((sum, b) => sum + parseInt(b.billAmount || 0), 0);
-                            
+                return '';
+            };
+
+            return rows.map((row) => ({
+                raw: row,
+                workId: resolveField(row, headerMap.workId),
+                depositWorkId: resolveField(row, headerMap.depositWorkId),
+                budgetItemNo: resolveField(row, headerMap.budgetItemNo),
+                nameOfWork: resolveField(row, headerMap.nameOfWork),
+                aaAmount: toNumber(resolveField(row, headerMap.aaAmount)),
+                totalExpenditure: toNumber(resolveField(row, headerMap.totalExpenditure)),
+                contractCost: toNumber(resolveField(row, headerMap.contractCost)),
+                workOrderDate: resolveField(row, headerMap.workOrderDate),
+                workOrderDateObj: toDateValue(resolveField(row, headerMap.workOrderDate)),
+                timeLimitDays: toNumber(resolveField(row, headerMap.timeLimit)),
+                roadCategory: resolveField(row, headerMap.roadCategory),
+                chainageFrom: toNumber(resolveField(row, headerMap.chainageFrom)),
+                chainageTo: toNumber(resolveField(row, headerMap.chainageTo)),
+                contractorName: resolveField(row, headerMap.contractorName),
+            }));
+        };
+
+        const tokenSimilarity = (a, b) => {
+            if (!a || !b) return 0;
+            const ignore = new Set(['the', 'of', 'and', 'road', 'roads', 'construction', 'improvement', 'work', 'works']);
+            const tokensA = a.toLowerCase().split(/\s+/).filter((t) => t.length > 3 && !ignore.has(t));
+            const tokensB = b.toLowerCase().split(/\s+/).filter((t) => t.length > 3 && !ignore.has(t));
+            if (!tokensA.length || !tokensB.length) return 0;
+            const matches = tokensA.filter((t) => tokensB.includes(t)).length;
+            return matches / Math.max(tokensA.length, tokensB.length);
+        };
+
+        const matchPdfToExcel = (pdfData, excelRecords) => {
+            if (!excelRecords || excelRecords.length === 0) {
+                return { record: null, score: 0, reason: 'No Excel records available' };
+            }
+
+            let best = { record: null, score: 0, reason: 'No match' };
+            excelRecords.forEach((record) => {
+                let score = 0;
+                let reason = '';
+
+                if (pdfData.workId && record.workId && normalizeKey(pdfData.workId) === normalizeKey(record.workId)) {
+                    score = 100;
+                    reason = 'Matched by Work ID';
+                } else if (
+                    pdfData.depositWorkId &&
+                    record.depositWorkId &&
+                    normalizeKey(pdfData.depositWorkId) === normalizeKey(record.depositWorkId)
+                ) {
+                    score = 98;
+                    reason = 'Matched by Deposit Work ID';
+                } else if (
+                    pdfData.workId &&
+                    record.budgetItemNo &&
+                    normalizeKey(pdfData.workId) === normalizeKey(record.budgetItemNo)
+                ) {
+                    score = 85;
+                    reason = 'Matched by Budget Item No';
+                } else {
+                    const similarity = tokenSimilarity(pdfData.workName, record.nameOfWork);
+                    if (similarity >= 0.55) {
+                        score = Math.round(similarity * 100);
+                        reason = 'Matched by Work Name similarity';
+                    }
+                }
+
+                if (score > best.score) {
+                    best = { record, score, reason };
+                }
+            });
+
+            if (best.score < 55) {
+                return { record: null, score: best.score, reason: 'No strong match found' };
+            }
+
+            return best;
+        };
+
+        const findOverlappingWorks = (record, excelRecords) => {
+            if (!record || !excelRecords || !record.chainageFrom || !record.chainageTo) return [];
+            const baseRoad = extractRoadNumber(record.nameOfWork || '');
+            if (!baseRoad) return [];
+            return excelRecords.filter((item) => {
+                if (item === record || !item.chainageFrom || !item.chainageTo) return false;
+                const road = extractRoadNumber(item.nameOfWork || '');
+                if (!road || road !== baseRoad) return false;
+                return !(item.chainageTo < record.chainageFrom || item.chainageFrom > record.chainageTo);
+            });
+        };
+
+        const findSplittingGroup = (record, excelRecords) => {
+            if (!record || !excelRecords) return [];
+            const baseRoad = extractRoadNumber(record.nameOfWork || '');
+            if (!baseRoad) return [];
+            const year = record.workOrderDateObj ? record.workOrderDateObj.getFullYear() : null;
+            const candidates = excelRecords.filter((item) => {
+                const itemRoad = extractRoadNumber(item.nameOfWork || '');
+                if (!itemRoad || itemRoad !== baseRoad) return false;
+                const itemYear = item.workOrderDateObj ? item.workOrderDateObj.getFullYear() : null;
+                if (year && itemYear && itemYear !== year) return false;
+                if (item.contractCost === null || item.contractCost >= 10) return false;
+                if (record.contractorName && item.contractorName) {
+                    return normalizeKey(record.contractorName) === normalizeKey(item.contractorName);
+                }
+                return true;
+            });
+            return candidates.length >= 3 ? candidates : [];
+        };
+
+        const buildRedFlagResults = (pdfData, excelMatch, excelRecords) => {
+            const flags = [];
+            const matchRecord = excelMatch?.record || null;
+
+            const getAaAmount = () => {
+                return matchRecord?.aaAmount || toNumber(pdfData.aaAmount);
+            };
+            const getExpenditure = () => {
+                return matchRecord?.totalExpenditure || toNumber(pdfData.cumulativeExpenditure);
+            };
+
+            // 1. Diversion of Funds
+            if (pdfData.type === 'deposit_work' && pdfData.expenditureDetails?.length) {
+                pdfData.expenditureDetails.forEach((item, index) => {
+                    if (item.remark && pdfData.workName) {
+                        const remarkLower = item.remark.toLowerCase();
+                        const workLower = pdfData.workName.toLowerCase();
+                        const workTerms = workLower.split(/\s+/).filter((w) => w.length > 4);
+                        const matchingTerms = workTerms.filter((term) => remarkLower.includes(term));
+                        const matchRatio = workTerms.length > 0 ? matchingTerms.length / workTerms.length : 0;
+                        if (matchRatio < 0.3 && workTerms.length > 0) {
                             flags.push({
+                                ruleId: 1,
+                                ruleName: 'Diversion of Funds',
                                 severity: 'high',
+                                description: 'Remark differs materially from sanctioned work name.',
                                 details: {
-                                    'Work Name': data.workName,
-                                    'Survey Bills Found': surveyBills.length,
-                                    'Construction Bills Found': '0',
-                                    'Total Survey Expenditure': `₹ ${totalSurvey.toLocaleString('en-IN')}`,
-                                    'Survey Bill Dates': surveyBills.map(b => b.date).join(', '),
-                                    'Red Flag Reason': 'Survey conducted but no actual construction started',
-                                    'Implication': 'Unfruitful expenditure - money spent without achieving work objectives',
-                                    'Required Action': 'Investigate why construction was not undertaken after survey'
+                                    'Sanctioned Work': pdfData.workName,
+                                    'Bill Remark': item.remark,
+                                    'Bill Amount': `₹ ${parseInt(item.billAmount || 0).toLocaleString('en-IN')}`,
+                                    'Bill Date': item.date || 'Not specified',
+                                    'Match Score': `${(matchRatio * 100).toFixed(0)}%`,
+                                    'Audit Reference': 'PW Manual Para 305'
                                 }
                             });
                         }
                     }
-                    return flags;
-                }
-            },
-            {
-                id: 3,
-                name: "Excess Expenditure Without Approval",
-                description: "Expenditure exceeding AA by more than 10% requires government approval.",
-                severity: 'critical',
-                detect: (data) => {
-                    const flags = [];
-                    if (data.aaAmount && data.cumulativeExpenditure) {
-                        const aa = parseInt(data.aaAmount);
-                        const expense = parseInt(data.cumulativeExpenditure);
-                        const threshold = aa * 1.10;
-                        
-                        if (expense > threshold) {
-                            const excess = expense - aa;
-                            const excessPercent = ((excess / aa) * 100).toFixed(2);
-                            
-                            flags.push({
-                                severity: 'critical',
-                                details: {
-                                    'Work Name': data.workName,
-                                    'AA Amount': `₹ ${aa.toLocaleString('en-IN')}`,
-                                    'Current Expenditure': `₹ ${expense.toLocaleString('en-IN')}`,
-                                    'Allowed 10% Excess': `₹ ${(aa * 0.10).toLocaleString('en-IN')}`,
-                                    'Maximum Allowed': `₹ ${threshold.toLocaleString('en-IN')}`,
-                                    'Actual Excess': `₹ ${excess.toLocaleString('en-IN')} (${excessPercent}%)`,
-                                    'Red Flag Reason': `Expenditure ${excessPercent}% over AA (allowed: 10%)`,
-                                    'Required Action': 'Obtain government approval for expenditure exceeding 110% of AA',
-                                    'Financial Irregularity': 'YES - Unapproved excess expenditure'
-                                }
-                            });
+                });
+            }
+
+            // 2. Wasteful Survey Expenditure
+            if (pdfData.expenditureDetails?.length) {
+                const surveyBills = pdfData.expenditureDetails.filter((item) =>
+                    item.remark && item.remark.toLowerCase().includes('survey')
+                );
+                const nonSurveyBills = pdfData.expenditureDetails.filter((item) =>
+                    !item.remark || !item.remark.toLowerCase().includes('survey')
+                );
+                const nonSurveyPaid = nonSurveyBills.filter((item) => parseInt(item.billAmount || 0) > 0);
+                if (surveyBills.length > 0 && nonSurveyPaid.length === 0) {
+                    const totalSurvey = surveyBills.reduce((sum, b) => sum + parseInt(b.billAmount || 0), 0);
+                    flags.push({
+                        ruleId: 2,
+                        ruleName: 'Unfruitful Survey Expenditure',
+                        severity: 'high',
+                        description: 'Survey bills exist but no other paid items found.',
+                        details: {
+                            'Survey Bills Found': surveyBills.length,
+                            'Total Survey Expenditure': `₹ ${totalSurvey.toLocaleString('en-IN')}`,
+                            'Construction Bills Paid': '0',
+                            'Audit Reference': 'Tender conditions - survey before work'
                         }
-                    }
-                    return flags;
-                }
-            },
-            {
-                id: 4,
-                name: "Delay in Work Completion",
-                description: "Work must be completed within stipulated contract period.",
-                severity: 'high',
-                detect: (data) => {
-                    const flags = [];
-                    const today = new Date('2026-02-02');
-                    let completionDate = null;
-                    
-                    if (data.extendedTimeLimit) {
-                        const parts = data.extendedTimeLimit.split(/[-\/]/);
-                        completionDate = new Date(parts[2], parts[1] - 1, parts[0]);
-                    } else if (data.workOrderDate && data.originalTimeLimitDays) {
-                        const parts = data.workOrderDate.split(/[-\/]/);
-                        const start = new Date(parts[2], parts[1] - 1, parts[0]);
-                        completionDate = new Date(start.setDate(start.getDate() + parseInt(data.originalTimeLimitDays)));
-                    }
-                    
-                    if (completionDate && today > completionDate) {
-                        const delayDays = Math.floor((today - completionDate) / (1000 * 60 * 60 * 24));
-                        
-                        flags.push({
-                            severity: 'high',
-                            details: {
-                                'Work Name': data.workName,
-                                'Stipulated Completion': completionDate.toLocaleDateString('en-IN'),
-                                'Current Date': today.toLocaleDateString('en-IN'),
-                                'Delay': `${delayDays} days (${(delayDays / 30).toFixed(1)} months)`,
-                                'Red Flag Reason': 'Work not completed within contract period',
-                                'Implication': 'Time and cost overrun, delayed public benefit'
-                            }
-                        });
-                    }
-                    return flags;
-                }
-            },
-            {
-                id: 5,
-                name: "Non-Recovery of Centage Charges",
-                description: "5% centage charges must be recovered on all deposit works as per MPW Manual.",
-                severity: 'medium',
-                detect: (data) => {
-                    const flags = [];
-                    if (data.type === 'deposit_work' && data.expenditureDetails && data.expenditureDetails.length > 0) {
-                        let violations = 0;
-                        let totalBill = 0;
-                        let totalCentage = 0;
-                        
-                        data.expenditureDetails.forEach(item => {
-                            const bill = parseInt(item.billAmount || 0);
-                            const centage = parseInt(item.centageAmount || 0);
-                            totalBill += bill;
-                            totalCentage += centage;
-                            
-                            if (bill > 0 && centage < bill * 0.05 * 0.9) {
-                                violations++;
-                            }
-                        });
-                        
-                        if (violations > 0) {
-                            const expected = totalBill * 0.05;
-                            const shortfall = expected - totalCentage;
-                            
-                            flags.push({
-                                severity: 'medium',
-                                details: {
-                                    'Work Name': data.workName,
-                                    'Work Type': 'Deposit Work',
-                                    'Total Bills': data.expenditureDetails.length,
-                                    'Bills with Violation': violations,
-                                    'Total Bill Amount': `₹ ${totalBill.toLocaleString('en-IN')}`,
-                                    'Expected Centage (5%)': `₹ ${expected.toLocaleString('en-IN')}`,
-                                    'Actually Recovered': `₹ ${totalCentage.toLocaleString('en-IN')}`,
-                                    'Shortfall': `₹ ${shortfall.toLocaleString('en-IN')}`,
-                                    'Red Flag Reason': `Centage not recovered on ${violations} bill(s)`,
-                                    'Revenue Loss': `₹ ${shortfall.toLocaleString('en-IN')}`,
-                                    'Required Action': 'Recover centage charges from user department'
-                                }
-                            });
-                        }
-                    }
-                    return flags;
-                }
-            },
-            {
-                id: 6,
-                name: "Unspent Balance Not Returned",
-                description: "Unspent deposit amounts must be returned to user department after work completion.",
-                severity: 'high',
-                detect: (data) => {
-                    const flags = [];
-                    if (data.type === 'deposit_work' && data.balanceAmount) {
-                        const balance = parseInt(data.balanceAmount);
-                        
-                        if (balance > 100000) {
-                            const hasCompleted = data.expenditureDetails?.some(item => 
-                                item.remark && item.remark.toLowerCase().includes('completed')
-                            );
-                            
-                            if (hasCompleted) {
-                                flags.push({
-                                    severity: 'high',
-                                    details: {
-                                        'Work Name': data.workName,
-                                        'User Department': data.userDepartment || 'Not specified',
-                                        'Balance with DDO': `₹ ${balance.toLocaleString('en-IN')}`,
-                                        'Work Status': 'Completed',
-                                        'Red Flag Reason': 'Unspent balance not returned after work completion',
-                                        'Implication': 'User department funds unnecessarily blocked',
-                                        'Required Action': 'Return unspent amount to user department immediately'
-                                    }
-                                });
-                            }
-                        }
-                    }
-                    return flags;
+                    });
                 }
             }
-        ];
+
+            // 3. Excess Expenditure (>10% AA)
+            const aaAmount = getAaAmount();
+            const expenditure = getExpenditure();
+            if (aaAmount && expenditure && expenditure > aaAmount * 1.1) {
+                const excess = expenditure - aaAmount;
+                const excessPercent = ((excess / aaAmount) * 100).toFixed(2);
+                flags.push({
+                    ruleId: 3,
+                    ruleName: 'Excess Expenditure Without Approval',
+                    severity: 'critical',
+                    description: 'Expenditure exceeds AA by more than 10%.',
+                    details: {
+                        'AA Amount': `₹ ${aaAmount.toLocaleString('en-IN')}`,
+                        'Expenditure': `₹ ${expenditure.toLocaleString('en-IN')}`,
+                        'Excess': `₹ ${excess.toLocaleString('en-IN')} (${excessPercent}%)`
+                    }
+                });
+            }
+
+            // 4. Overlapping Work
+            if (matchRecord) {
+                const overlaps = findOverlappingWorks(matchRecord, excelRecords);
+                if (overlaps.length > 0) {
+                    flags.push({
+                        ruleId: 4,
+                        ruleName: 'Overlapping Works',
+                        severity: 'high',
+                        description: 'Chainage overlap detected with other works on same road.',
+                        details: {
+                            'Matched Work': matchRecord.nameOfWork || 'N/A',
+                            'Overlapping Records': overlaps.map((item) => item.nameOfWork).join(' | ')
+                        }
+                    });
+                }
+            }
+
+            // 5. Delay in Completion
+            const workOrder = pdfData.workOrderDate || matchRecord?.workOrderDate || null;
+            const workOrderDate = toDateValue(workOrder) || matchRecord?.workOrderDateObj || null;
+            const timeLimit = pdfData.originalTimeLimitDays || matchRecord?.timeLimitDays;
+            if (workOrderDate && timeLimit) {
+                const completion = new Date(workOrderDate.getTime() + parseInt(timeLimit, 10) * 86400000);
+                if (new Date() > completion) {
+                    const delayDays = Math.floor((new Date() - completion) / 86400000);
+                    flags.push({
+                        ruleId: 5,
+                        ruleName: 'Delay in Completion of Work',
+                        severity: 'high',
+                        description: 'Work exceeded stipulated completion date.',
+                        details: {
+                            'Work Order Date': workOrderDate.toLocaleDateString('en-IN'),
+                            'Time Limit (Days)': timeLimit,
+                            'Delay (Days)': delayDays
+                        }
+                    });
+                }
+            }
+
+            // 6. Splitting of Works
+            if (matchRecord) {
+                const splitGroup = findSplittingGroup(matchRecord, excelRecords);
+                if (splitGroup.length >= 3) {
+                    flags.push({
+                        ruleId: 6,
+                        ruleName: 'Splitting of Work',
+                        severity: 'high',
+                        description: 'Multiple small works on same road in same year.',
+                        details: {
+                            'Road': extractRoadNumber(matchRecord.nameOfWork || '') || 'N/A',
+                            'Number of Works': splitGroup.length,
+                            'Contractor': matchRecord.contractorName || 'Not specified'
+                        }
+                    });
+                }
+            }
+
+            // 7. Non-recovery of Centage Charges
+            if (pdfData.type === 'deposit_work' && pdfData.expenditureDetails?.length) {
+                let violations = 0;
+                let totalBill = 0;
+                let totalCentage = 0;
+                pdfData.expenditureDetails.forEach((item) => {
+                    const bill = parseInt(item.billAmount || 0);
+                    const centage = parseInt(item.centageAmount || 0);
+                    totalBill += bill;
+                    totalCentage += centage;
+                    if (bill > 0 && centage < bill * 0.05 * 0.9) {
+                        violations++;
+                    }
+                });
+                if (violations > 0) {
+                    const expected = totalBill * 0.05;
+                    const shortfall = expected - totalCentage;
+                    flags.push({
+                        ruleId: 7,
+                        ruleName: 'Non-Recovery of Centage Charges',
+                        severity: 'medium',
+                        description: 'Centage charges not recovered on deposit works.',
+                        details: {
+                            'Bills with Violation': violations,
+                            'Expected Centage (5%)': `₹ ${expected.toLocaleString('en-IN')}`,
+                            'Recovered': `₹ ${totalCentage.toLocaleString('en-IN')}`,
+                            'Shortfall': `₹ ${shortfall.toLocaleString('en-IN')}`
+                        }
+                    });
+                }
+            }
+
+            // 8. Unspent Balance Not Returned
+            if (pdfData.type === 'deposit_work' && pdfData.balanceAmount) {
+                const balance = parseInt(pdfData.balanceAmount || 0);
+                if (balance > 100000) {
+                    const hasCompleted = pdfData.expenditureDetails?.some((item) =>
+                        item.remark && item.remark.toLowerCase().includes('completed')
+                    );
+                    if (hasCompleted) {
+                        flags.push({
+                            ruleId: 8,
+                            ruleName: 'Unspent Balance Not Returned',
+                            severity: 'high',
+                            description: 'Balance remains with DDO after completion.',
+                            details: {
+                                'Balance with DDO': `₹ ${balance.toLocaleString('en-IN')}`,
+                                'User Department': pdfData.userDepartment || 'Not specified'
+                            }
+                        });
+                    }
+                }
+            }
+
+            return flags;
+        };
 
         async function parseDocument(file) {
             const fileType = file.name.toLowerCase();
@@ -1106,7 +1272,7 @@
             for (let i = 1; i <= pdf.numPages; i++) {
                 const page = await pdf.getPage(i);
                 const textContent = await page.getTextContent();
-                const pageText = textContent.items.map(item => item.str).join(' ');
+                const pageText = buildLineText(textContent.items);
                 pageTexts.push({ page: i, text: pageText });
                 fullText += pageText + '\n\n';
             }
@@ -1122,30 +1288,28 @@
 
         // Main App Component
         function App() {
-            const [files, setFiles] = useState([]);
-            const [processing, setProcessing] = useState(false);
-            const [currentFile, setCurrentFile] = useState(null);
-            const [progress, setProgress] = useState(0);
-            const [results, setResults] = useState([]);
-            const [dragging, setDragging] = useState(false);
+            const [pdfFile, setPdfFile] = useState(null);
             const [excelFile, setExcelFile] = useState(null);
-            const [excelFormats, setExcelFormats] = useState({ excel: true, pdf: true });
-            const [excelLoading, setExcelLoading] = useState(false);
-            const [excelResult, setExcelResult] = useState(null);
-            const [excelError, setExcelError] = useState(null);
+            const [processing, setProcessing] = useState(false);
+            const [progress, setProgress] = useState(0);
+            const [analysisResult, setAnalysisResult] = useState(null);
+            const [analysisError, setAnalysisError] = useState(null);
+            const [dragging, setDragging] = useState(false);
             const fileInputRef = useRef(null);
             const excelInputRef = useRef(null);
 
-            const handleFileSelect = (e) => {
-                const selectedFiles = Array.from(e.target.files);
-                setFiles(prev => [...prev, ...selectedFiles]);
+            const handlePdfSelect = (e) => {
+                const selected = e.target.files[0];
+                setPdfFile(selected || null);
+                setAnalysisResult(null);
+                setAnalysisError(null);
             };
 
             const handleExcelSelect = (e) => {
                 const selected = e.target.files[0];
                 setExcelFile(selected || null);
-                setExcelResult(null);
-                setExcelError(null);
+                setAnalysisResult(null);
+                setAnalysisError(null);
             };
 
             const handleDragOver = (e) => {
@@ -1160,119 +1324,75 @@
             const handleDrop = (e) => {
                 e.preventDefault();
                 setDragging(false);
-                const droppedFiles = Array.from(e.dataTransfer.files);
-                setFiles(prev => [...prev, ...droppedFiles]);
-            };
-
-            const analyzeExcel = async () => {
-                if (!excelFile) {
-                    setExcelError('Please select an Excel file.');
-                    return;
-                }
-
-                const formats = Object.entries(excelFormats)
-                    .filter(([_, selected]) => selected)
-                    .map(([format]) => format);
-
-                if (formats.length === 0) {
-                    setExcelError('Select at least one output format.');
-                    return;
-                }
-
-                setExcelLoading(true);
-                setExcelError(null);
-
-                const formData = new FormData();
-                formData.append('file', excelFile);
-                formats.forEach(format => formData.append('formats', format));
-
-                try {
-                    const response = await fetch('/upload', {
-                        method: 'POST',
-                        body: formData
-                    });
-                    const result = await response.json();
-
-                    if (!result.success) {
-                        throw new Error(result.error || 'Analysis failed.');
-                    }
-
-                    setExcelResult(result);
-                } catch (error) {
-                    setExcelError(error.message);
-                } finally {
-                    setExcelLoading(false);
+                const droppedFile = e.dataTransfer.files[0];
+                if (droppedFile) {
+                    setPdfFile(droppedFile);
+                    setAnalysisResult(null);
+                    setAnalysisError(null);
                 }
             };
 
             const analyzeDocuments = async () => {
-                setProcessing(true);
-                setResults([]);
-                
-                for (let i = 0; i < files.length; i++) {
-                    const file = files[i];
-                    setCurrentFile(file.name);
-                    setProgress((i / files.length) * 100);
-                    
-                    try {
-                        const data = await parseDocument(file);
-                        const detectedFlags = [];
-
-                        RED_FLAG_RULES.forEach(rule => {
-                            const flags = rule.detect(data);
-                            flags.forEach(flag => {
-                                detectedFlags.push({
-                                    ruleId: rule.id,
-                                    ruleName: rule.name,
-                                    description: rule.description,
-                                    severity: rule.severity,
-                                    ...flag
-                                });
-                            });
-                        });
-
-                        setResults(prev => [...prev, {
-                            fileName: file.name,
-                            extractedData: data,
-                            flags: detectedFlags
-                        }]);
-                    } catch (error) {
-                        setResults(prev => [...prev, {
-                            fileName: file.name,
-                            error: error.message,
-                            flags: []
-                        }]);
-                    }
+                if (!pdfFile) {
+                    setAnalysisError('Please upload the Utilisation Certificate PDF to proceed.');
+                    return;
                 }
-                
-                setProgress(100);
-                setProcessing(false);
+
+                setProcessing(true);
+                setProgress(10);
+                setAnalysisError(null);
+
+                try {
+                    const pdfData = await parseDocument(pdfFile);
+                    setProgress(45);
+
+                    let excelRecords = [];
+                    if (excelFile) {
+                        excelRecords = await parseExcelFile(excelFile);
+                    }
+                    setProgress(70);
+
+                    const matchInfo = excelFile ? matchPdfToExcel(pdfData, excelRecords) : null;
+                    const flags = buildRedFlagResults(pdfData, matchInfo, excelRecords);
+
+                    setAnalysisResult({
+                        fileName: pdfFile.name,
+                        extractedData: pdfData,
+                        flags,
+                        matchInfo,
+                        excelRecordCount: excelRecords.length
+                    });
+                    setProgress(100);
+                } catch (error) {
+                    setAnalysisError(error.message || 'Analysis failed.');
+                } finally {
+                    setProcessing(false);
+                }
             };
 
             const exportExcelReport = () => {
-                const summaryRows = results.map(doc => ({
-                    File: doc.fileName,
-                    Work: doc.extractedData?.workName || 'N/A',
-                    Type: doc.extractedData?.type || 'N/A',
-                    'AA Amount': doc.extractedData?.aaAmount || 'N/A',
-                    'Cumulative Expenditure': doc.extractedData?.cumulativeExpenditure || 'N/A',
-                    'Red Flags': doc.flags?.length || 0,
-                    'Extraction Quality': `${doc.extractedData?.extractionQuality || 0}%`
-                }));
+                if (!analysisResult) return;
+                const doc = analysisResult;
+                const summaryRows = [
+                    {
+                        File: doc.fileName,
+                        Work: doc.extractedData?.workName || 'N/A',
+                        Type: doc.extractedData?.type || 'N/A',
+                        'AA Amount': doc.extractedData?.aaAmount || 'N/A',
+                        'Cumulative Expenditure': doc.extractedData?.cumulativeExpenditure || 'N/A',
+                        'Red Flags': doc.flags?.length || 0,
+                        'Extraction Quality': `${doc.extractedData?.extractionQuality || 0}%`
+                    }
+                ];
 
-                const flagRows = [];
-                results.forEach(doc => {
-                    doc.flags.forEach(flag => {
-                        flagRows.push({
-                            File: doc.fileName,
-                            Rule: flag.ruleName,
-                            Severity: flag.severity,
-                            Details: Object.entries(flag.details || {})
-                                .map(([k, v]) => `${k}: ${v}`)
-                                .join(' | ')
-                        });
-                    });
-                });
+                const flagRows = doc.flags.map((flag) => ({
+                    File: doc.fileName,
+                    Rule: flag.ruleName,
+                    Severity: flag.severity,
+                    Details: Object.entries(flag.details || {})
+                        .map(([k, v]) => `${k}: ${v}`)
+                        .join(' | ')
+                }));
 
                 const workbook = XLSX.utils.book_new();
                 const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
@@ -1287,40 +1407,58 @@
             };
 
             const exportPdfReport = () => {
+                if (!analysisResult) return;
                 const { jsPDF } = window.jspdf;
                 const pdf = new jsPDF();
+                const marginX = 14;
+                let y = 18;
 
                 pdf.setFontSize(16);
-                pdf.text('PWD Red Flag Detection Report', 14, 20);
+                pdf.text('PWD Red Flag Detection Report', marginX, y);
+                y += 8;
                 pdf.setFontSize(10);
-                pdf.text(`Generated: ${new Date().toLocaleString('en-IN')}`, 14, 28);
+                pdf.text(`Generated: ${new Date().toLocaleString('en-IN')}`, marginX, y);
+                y += 10;
 
-                let y = 40;
-                results.forEach((doc, idx) => {
-                    if (y > 260) {
+                const doc = analysisResult;
+                const addLine = (label, value) => {
+                    const text = `${label}: ${value}`;
+                    const lines = pdf.splitTextToSize(text, 180);
+                    pdf.text(lines, marginX, y);
+                    y += lines.length * 5;
+                };
+
+                addLine('File', doc.fileName);
+                addLine('Work', doc.extractedData?.workName || 'N/A');
+                addLine('Work ID', doc.extractedData?.workId || doc.extractedData?.depositWorkId || 'N/A');
+                addLine('Red Flags', doc.flags?.length || 0);
+
+                y += 6;
+                pdf.setFontSize(12);
+                pdf.text('Red Flag Details', marginX, y);
+                y += 6;
+                pdf.setFontSize(9);
+
+                doc.flags.forEach((flag) => {
+                    if (y > 270) {
                         pdf.addPage();
                         y = 20;
                     }
-                    pdf.setFontSize(12);
-                    pdf.text(`Document ${idx + 1}: ${doc.fileName}`, 14, y);
-                    y += 6;
-                    pdf.setFontSize(10);
-                    pdf.text(`Work: ${doc.extractedData?.workName || 'N/A'}`, 14, y);
+                    const header = `${flag.ruleName} (${flag.severity})`;
+                    pdf.text(pdf.splitTextToSize(header, 180), marginX, y);
                     y += 5;
-                    pdf.text(`Red Flags: ${doc.flags?.length || 0}`, 14, y);
-                    y += 6;
-
-                    doc.flags.forEach(flag => {
-                        if (y > 270) {
-                            pdf.addPage();
-                            y = 20;
-                        }
-                        pdf.text(`- ${flag.ruleName} (${flag.severity})`, 16, y);
-                        y += 5;
+                    Object.entries(flag.details || {}).forEach(([k, v]) => {
+                        const detailLine = `• ${k}: ${v}`;
+                        const lines = pdf.splitTextToSize(detailLine, 175);
+                        pdf.text(lines, marginX + 2, y);
+                        y += lines.length * 4.5;
                     });
-
-                    y += 6;
+                    y += 4;
                 });
+
+                if (doc.flags.length === 0) {
+                    pdf.text('No red flags detected for this work.', marginX, y);
+                }
 
                 pdf.save(`PWD_Report_${new Date().toISOString().split('T')[0]}.pdf`);
             };
@@ -1333,10 +1471,35 @@
                     </div>
 
                     <div className="upload-grid">
-                        <div className="upload-section">
-                            <h2 style={{ marginBottom: '12px' }}>Excel Red Flag Analyzer</h2>
+                        <div
+                            className={`upload-section ${dragging ? 'dragging' : ''}`}
+                            onDragOver={handleDragOver}
+                            onDragLeave={handleDragLeave}
+                            onDrop={handleDrop}
+                        >
+                            <h2 style={{ marginBottom: '12px' }}>Utilisation Certificate (PDF/DOCX)</h2>
                             <p style={{ marginBottom: '20px', color: '#666' }}>
-                                Upload Excel sheets for automated red flag analysis and download Excel/PDF reports.
+                                Upload the Utilisation Certificate to extract work details and bill information.
+                            </p>
+                            <button className="upload-button" onClick={() => fileInputRef.current?.click()}>
+                                Select PDF/DOCX File
+                            </button>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                className="file-input"
+                                accept=".pdf,.docx"
+                                onChange={handlePdfSelect}
+                            />
+                            <p style={{ marginTop: '12px', color: '#666' }}>
+                                {pdfFile ? pdfFile.name : 'No file selected'}
+                            </p>
+                        </div>
+
+                        <div className="upload-section">
+                            <h2 style={{ marginBottom: '12px' }}>Transaction Records (Excel)</h2>
+                            <p style={{ marginBottom: '20px', color: '#666' }}>
+                                Upload the Excel register to map Work IDs and validate transactions.
                             </p>
                             <button className="upload-button" onClick={() => excelInputRef.current?.click()}>
                                 Select Excel File
@@ -1349,129 +1512,36 @@
                                 onChange={handleExcelSelect}
                             />
                             <p style={{ marginTop: '12px', color: '#666' }}>
-                                {excelFile ? excelFile.name : 'No file selected'}
-                            </p>
-
-                            <div className="format-selection">
-                                <strong>Output Formats</strong>
-                                <div className="checkbox-group">
-                                    <label className="checkbox-label">
-                                        <input
-                                            type="checkbox"
-                                            checked={excelFormats.excel}
-                                            onChange={(e) => setExcelFormats(prev => ({ ...prev, excel: e.target.checked }))}
-                                        />
-                                        Excel Report
-                                    </label>
-                                    <label className="checkbox-label">
-                                        <input
-                                            type="checkbox"
-                                            checked={excelFormats.pdf}
-                                            onChange={(e) => setExcelFormats(prev => ({ ...prev, pdf: e.target.checked }))}
-                                        />
-                                        PDF Report
-                                    </label>
-                                </div>
-                            </div>
-
-                            <button
-                                className="upload-button"
-                                style={{ marginTop: '16px' }}
-                                onClick={analyzeExcel}
-                                disabled={excelLoading}
-                            >
-                                {excelLoading ? 'Analyzing...' : 'Analyze Excel'}
-                            </button>
-
-                            {excelError && (
-                                <p style={{ marginTop: '12px', color: '#FF6B6B' }}>{excelError}</p>
-                            )}
-                        </div>
-
-                        <div
-                            className={`upload-section ${dragging ? 'dragging' : ''}`}
-                            onDragOver={handleDragOver}
-                            onDragLeave={handleDragLeave}
-                            onDrop={handleDrop}
-                        >
-                            <h2 style={{ marginBottom: '12px' }}>PDF/DOCX Red Flag Analyzer</h2>
-                            <p style={{ marginBottom: '20px', color: '#666' }}>
-                                Drag & drop PDF/DOCX files for instant extraction and analysis.
-                            </p>
-                            <button className="upload-button" onClick={() => fileInputRef.current?.click()}>
-                                Select PDF/DOCX Files
-                            </button>
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                className="file-input"
-                                multiple
-                                accept=".pdf,.docx"
-                                onChange={handleFileSelect}
-                            />
-                            <p style={{ marginTop: '20px', color: '#666' }}>
-                                or drag and drop here
+                                {excelFile ? excelFile.name : 'Optional - no Excel file selected'}
                             </p>
                         </div>
                     </div>
 
-                    {excelResult && (
-                        <div className="excel-results">
-                            <div className="section-title">Excel Analysis Results</div>
-                            <div className="data-grid">
-                                <div className="data-item">
-                                    <div className="data-label">Total Records</div>
-                                    <div className="data-value">{excelResult.summary?.total_records || 0}</div>
-                                </div>
-                                <div className="data-item">
-                                    <div className="data-label">Red Flags</div>
-                                    <div className="data-value">{excelResult.summary?.red_flagged || 0}</div>
-                                </div>
-                                <div className="data-item">
-                                    <div className="data-label">Green Flags</div>
-                                    <div className="data-value">{excelResult.summary?.green_flagged || 0}</div>
-                                </div>
-                            </div>
-
-                            <div className="download-grid">
-                                {excelResult.output_files && Object.entries(excelResult.output_files).map(([format, info]) => (
-                                    <a key={format} href={info.url} className="download-btn" download>
-                                        Download {format.toUpperCase()}
-                                    </a>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {files.length > 0 && results.length === 0 && !processing && (
-                        <div style={{ background: '#FFF5F0', padding: '20px', borderRadius: '12px', marginBottom: '24px' }}>
-                            <h3>Files Ready ({files.length})</h3>
-                            {files.map((file, i) => (
-                                <div key={i} style={{ padding: '8px', background: '#fff', margin: '8px 0', borderRadius: '6px' }}>
-                                    {file.name}
-                                </div>
-                            ))}
-                            <button 
-                                className="upload-button"
-                                onClick={analyzeDocuments}
-                                style={{ marginTop: '16px', fontSize: '18px', padding: '16px 48px' }}
-                            >
-                                Analyze All Documents
-                            </button>
-                        </div>
-                    )}
+                    <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                        <button
+                            className="upload-button"
+                            onClick={analyzeDocuments}
+                            disabled={processing}
+                            style={{ fontSize: '18px', padding: '16px 48px' }}
+                        >
+                            {processing ? 'Analyzing...' : 'Analyze Red Flags'}
+                        </button>
+                        {analysisError && (
+                            <p style={{ marginTop: '12px', color: '#FF6B6B' }}>{analysisError}</p>
+                        )}
+                    </div>
 
                     {processing && (
                         <div className="processing">
                             <div className="spinner"></div>
-                            <p><strong>Processing:</strong> {currentFile}</p>
+                            <p><strong>Processing:</strong> {pdfFile?.name || 'Document'}</p>
                             <div className="progress-bar">
                                 <div className="progress-fill" style={{ width: `${progress}%` }}></div>
                             </div>
                         </div>
                     )}
 
-                    {results.length > 0 && (
+                    {analysisResult && (
                         <>
                             <div className="export-section">
                                 <button className="export-button" onClick={exportExcelReport}>
@@ -1482,15 +1552,13 @@
                                 </button>
                                 <button 
                                     className="export-button secondary" 
-                                    onClick={() => { setResults([]); setFiles([]); }}
+                                    onClick={() => { setAnalysisResult(null); setPdfFile(null); setExcelFile(null); }}
                                 >
                                     New Analysis
                                 </button>
                             </div>
 
-                            {results.map((doc, idx) => (
-                                <DocumentAnalysis key={idx} doc={doc} />
-                            ))}
+                            <DocumentAnalysis doc={analysisResult} />
                         </>
                     )}
                 </div>
@@ -1505,6 +1573,8 @@
             const qualityClass = data.extractionQuality >= 80 ? 'excellent' : 
                                  data.extractionQuality >= 60 ? 'good' :
                                  data.extractionQuality >= 40 ? 'fair' : 'poor';
+            const matchInfo = doc.matchInfo;
+            const matchedRecord = matchInfo?.record || null;
 
             return (
                 <div className="document-analysis">
@@ -1540,6 +1610,16 @@
                                 <div className="data-label">Division</div>
                                 <div className="data-value">{data.division || 'Not found'}</div>
                             </div>
+                            <div className="data-item">
+                                <div className="data-label">Excel Match</div>
+                                <div className="data-value">
+                                    {matchedRecord
+                                        ? `${matchedRecord.nameOfWork || 'Matched'} (${matchInfo.score}%)`
+                                        : doc.excelRecordCount
+                                            ? 'No match found'
+                                            : 'Excel not provided'}
+                                </div>
+                            </div>
                         </div>
 
                         <div style={{ marginTop: '16px' }}>
@@ -1548,6 +1628,18 @@
                                 <div className="data-value">{data.workName || 'Not found'}</div>
                             </div>
                         </div>
+
+                        {matchedRecord && (
+                            <div style={{ marginTop: '16px' }} className="data-item">
+                                <div className="data-label">Matched Excel Record</div>
+                                <div className="data-value">
+                                    <div><strong>Budget Item:</strong> {matchedRecord.budgetItemNo || 'N/A'}</div>
+                                    <div><strong>AA Amount:</strong> {matchedRecord.aaAmount ? `₹ ${matchedRecord.aaAmount.toLocaleString('en-IN')}` : 'N/A'}</div>
+                                    <div><strong>Expenditure:</strong> {matchedRecord.totalExpenditure ? `₹ ${matchedRecord.totalExpenditure.toLocaleString('en-IN')}` : 'N/A'}</div>
+                                    <div><strong>Match Reason:</strong> {matchInfo?.reason || 'Matched'}</div>
+                                </div>
+                            </div>
+                        )}
 
 
                         <div className="extraction-debug">

@@ -207,13 +207,14 @@ class ReportGenerator:
         try:
             from reportlab.lib import colors
             from reportlab.lib.pagesizes import A4
-            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
             from reportlab.platypus import (
                 SimpleDocTemplate,
                 Paragraph,
                 Spacer,
                 Table,
                 TableStyle,
+                PageBreak,
             )
         except ImportError as exc:
             raise ValueError(
@@ -226,6 +227,25 @@ class ReportGenerator:
         )
 
         styles = getSampleStyleSheet()
+        header_style = ParagraphStyle(
+            "HeaderStyle",
+            parent=styles["Heading2"],
+            spaceBefore=12,
+            spaceAfter=8,
+        )
+        label_style = ParagraphStyle(
+            "LabelStyle",
+            parent=styles["BodyText"],
+            fontSize=9,
+            leading=11,
+        )
+        wrap_style = ParagraphStyle(
+            "WrapStyle",
+            parent=styles["BodyText"],
+            fontSize=9,
+            leading=11,
+        )
+
         story = [
             Paragraph("PWD Red Flag Analysis Report", styles["Title"]),
             Paragraph(
@@ -246,7 +266,8 @@ class ReportGenerator:
             ["Low Severity", summary.get("by_severity", {}).get("LOW", 0)],
         ]
 
-        summary_table = Table(summary_data, hAlign="LEFT")
+        story.append(Paragraph("Summary", header_style))
+        summary_table = Table(summary_data, hAlign="LEFT", colWidths=[160, 120])
         summary_table.setStyle(
             TableStyle(
                 [
@@ -260,32 +281,64 @@ class ReportGenerator:
         )
         story.extend([summary_table, Spacer(1, 16)])
 
+        flag_summary_rows = [["Flag Type", "Occurrences", "Percentage"]]
+        for flag_name, count in summary.get("by_flag_type", {}).items():
+            percentage = round(
+                count / summary.get("total_red_flags", 1) * 100, 2
+            )
+            flag_summary_rows.append([flag_name, count, f"{percentage}%"])
+
+        if len(flag_summary_rows) > 1:
+            story.append(Paragraph("Flag Type Summary", header_style))
+            flag_summary_table = Table(
+                flag_summary_rows, hAlign="LEFT", colWidths=[240, 80, 80]
+            )
+            flag_summary_table.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#FFE5D9")),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#333333")),
+                        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#DDDDDD")),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ]
+                )
+            )
+            story.extend([flag_summary_table, Spacer(1, 16)])
+
         red_flag_rows = [
-            ["Excel Row", "Work Name", "Flag", "Severity", "Reason"]
+            ["Excel Row", "Budget Item", "Work Name", "Flag", "Severity", "Reason"]
         ]
         for entry in self.report_data.get("red_flagged", []):
             for flag in entry.get("flags", []):
                 red_flag_rows.append(
                     [
-                        entry.get("record_index", ""),
-                        entry.get("name_of_work", "")[:50],
-                        flag.get("flag_name", ""),
-                        flag.get("severity", "N/A"),
-                        flag.get("description", "")[:80],
+                        Paragraph(str(entry.get("record_index", "")), label_style),
+                        Paragraph(str(entry.get("budget_item_no", "")), wrap_style),
+                        Paragraph(str(entry.get("name_of_work", "")), wrap_style),
+                        Paragraph(str(flag.get("flag_name", "")), wrap_style),
+                        Paragraph(str(flag.get("severity", "N/A")), label_style),
+                        Paragraph(str(flag.get("description", "")), wrap_style),
                     ]
                 )
 
         if len(red_flag_rows) > 1:
-            story.append(Paragraph("Red Flag Details", styles["Heading2"]))
-            red_flag_table = Table(red_flag_rows, hAlign="LEFT", colWidths=[60, 150, 110, 70, 160])
+            story.append(PageBreak())
+            story.append(Paragraph("Red Flag Details", header_style))
+            red_flag_table = Table(
+                red_flag_rows,
+                hAlign="LEFT",
+                colWidths=[55, 80, 160, 110, 60, 150],
+            )
             red_flag_table.setStyle(
                 TableStyle(
                     [
                         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#FFE5D9")),
                         ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#333333")),
-                        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
+                        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#DDDDDD")),
                         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                         ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FFF7F2")]),
                     ]
                 )
             )
